@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ServiceManagement
 
 func log(_ msg: String) {
     let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
@@ -14,7 +15,41 @@ func log(_ msg: String) {
     }
 }
 
+// MARK: - Settings Manager
+class SettingsManager: ObservableObject {
+    static let shared = SettingsManager()
+    
+    @Published var launchAtLogin: Bool {
+        didSet {
+            UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
+            setLaunchAtLogin(launchAtLogin)
+        }
+    }
+    
+    private init() {
+        self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
+    }
+    
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        if #available(macOS 13.0, *) {
+            do {
+                if enabled {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                log("Launch at login error: \(error)")
+            }
+        } else {
+            SMLoginItemSetEnabled((Bundle.main.bundleIdentifier ?? "") as CFString, enabled)
+        }
+    }
+}
+
+// MARK: - App Info
 struct AppInfo {
+    let id: String
     let name: String
     let icon: NSImage?
     let pid: pid_t
@@ -27,20 +62,105 @@ func getApps() -> [AppInfo] {
         $0.bundleIdentifier != "com.apple.finder"
     }.compactMap { app in
         guard let name = app.localizedName else { return nil }
-        return AppInfo(name: name, icon: app.icon, pid: app.processIdentifier)
+        return AppInfo(id: app.bundleIdentifier ?? UUID().uuidString, name: name, icon: app.icon, pid: app.processIdentifier)
     }
 }
 
+// MARK: - Global State
 var currentApps: [AppInfo] = []
 var currentIndex: Int = 0
 var isVisible: Bool = false
 var switchPanel: NSPanel?
+var lastSelectedBundleID: String?
 let cubeState = CubeStateModel()
 
 class CubeStateModel: ObservableObject {
     @Published var index: Int = 0
 }
 
+// MARK: - Settings View
+struct SettingsView: View {
+    @ObservedObject var settings = SettingsManager.shared
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("CubeTab 设置")
+                    .font(.headline)
+                Spacer()
+                Button("关闭") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding()
+            
+            Divider()
+            
+            Form {
+                Toggle("开机自启动", isOn: $settings.launchAtLogin)
+                    .toggleStyle(.switch)
+                    .padding(.vertical, 4)
+            }
+            .padding()
+            
+            Divider()
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text("快捷键")
+                    .font(.subheadline.weight(.medium))
+                HStack {
+                    Text("呼出/切换")
+                    Spacer()
+                    KeyboardShortcutLabel(keys: ["⌘", "esc"])
+                }
+                HStack {
+                    Text("选择应用")
+                    Spacer()
+                    Text("松开 ⌘ 键")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            
+            Divider()
+            
+            HStack {
+                Spacer()
+                Text("v1.0")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.vertical, 8)
+        }
+        .frame(width: 340, height: 320)
+    }
+}
+
+struct KeyboardShortcutLabel: View {
+    let keys: [String]
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(keys, id: \.self) { key in
+                Text(key)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.gray.opacity(0.2))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
+                    )
+            }
+        }
+    }
+}
+
+// MARK: - App Card View
 struct AppCardView: View {
     let app: AppInfo
     let isFront: Bool
@@ -65,7 +185,7 @@ struct AppCardView: View {
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 12)
-        .frame(width: 120, height: 140)
+        .frame(width: 140, height: 140)
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(.ultraThinMaterial)
@@ -92,9 +212,9 @@ struct IndexedCard: View {
         let off = normalizedOffset
         return AppCardView(app: app, isFront: index == currentIndex)
             .frame(width: width)
-            .offset(x: CGFloat(off) * width * 0.55)
+            .offset(x: CGFloat(off) * width * 0.38)
             .scaleEffect(off == 0 ? 1.0 : abs(off) == 1 ? 0.8 : 0.6)
-            .opacity(off == 0 ? 1.0 : abs(off) == 1 ? 0.6 : 0.2)
+            .opacity(off == 0 ? 1.0 : abs(off) == 1 ? 0.75 : 0.35)
             .zIndex(index == currentIndex ? 10.0 : 5.0 - Double(abs(off)))
     }
     
@@ -115,8 +235,7 @@ struct SwitcherView: View {
                     Image(systemName: "app.fill").font(.system(size: 40)).foregroundColor(.secondary)
                     Text("没有可切换的应用").foregroundColor(.secondary).padding(.top, 8)
                 }
-                .frame(width: 500, height: 400)
-            } else {
+                .frame(width: 700, height: 400)            } else {
                 GeometryReader { geo in
                     ZStack {
                         ForEach(currentApps.indices, id: \.self) { i in
@@ -131,28 +250,39 @@ struct SwitcherView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(width: 500, height: 400)
+                .frame(width: 700, height: 400)
             }
         }
     }
 }
 
+// MARK: - Panel
 class SwitchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
 
+// MARK: - Show / Hide
 func showSwitcher() {
     log("showSwitcher")
     currentApps = getApps()
     guard !currentApps.isEmpty else { log("no apps"); return }
-    cubeState.index = 0
-    currentIndex = 0
+    
+    // 尝试从上次选择的位置开始
+    var startIndex = 0
+    if let lastID = lastSelectedBundleID {
+        if let idx = currentApps.firstIndex(where: { $0.id == lastID }) {
+            startIndex = idx
+        }
+    }
+    
+    cubeState.index = startIndex
+    currentIndex = startIndex
     isVisible = true
     
     if switchPanel == nil {
         let panel = SwitchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 400),
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered, defer: false
         )
@@ -167,7 +297,7 @@ func showSwitcher() {
         panel.contentView = NSHostingView(rootView: SwitcherView(state: cubeState))
         if let screen = NSScreen.main {
             let sf = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: sf.midX - 250, y: sf.midY - 200))
+            panel.setFrameOrigin(NSPoint(x: sf.midX - 350, y: sf.midY - 200))
         }
         switchPanel = panel
     }
@@ -182,6 +312,7 @@ func hideSwitcher() {
     
     if !currentApps.isEmpty && currentIndex < currentApps.count {
         let target = currentApps[currentIndex]
+        lastSelectedBundleID = target.id
         if let app = NSRunningApplication(processIdentifier: target.pid) {
             app.activate(options: [.activateIgnoringOtherApps])
         }
@@ -195,9 +326,8 @@ func rotateNext() {
     log("rotate -> \(currentIndex): \(currentApps[currentIndex].name)")
 }
 
+// MARK: - Keyboard
 var isCmdDown = false
-var gMonitor: Any?
-var lMonitor: Any?
 
 func setupKeyboard() {
     log("Setting up keyboard...")
@@ -246,44 +376,112 @@ func setupKeyboard() {
     }
 }
 
-func handleKey(_ event: NSEvent) {
-    let cmd = event.modifierFlags.contains(.command)
-    log("Key event: type=\(event.type.rawValue) keyCode=\(event.keyCode) cmd=\(cmd)")
-    
-    switch event.type {
-    case .flagsChanged:
-        if cmd && !isCmdDown {
-            isCmdDown = true
-        } else if !cmd && isCmdDown {
-            isCmdDown = false
-            DispatchQueue.main.async {
-                if isVisible { hideSwitcher() }
-            }
-        }
-    case .keyDown:
-        if isCmdDown && event.keyCode == 53 {
-            log("ESC+CMD!")
-            DispatchQueue.main.async {
-                if isVisible { rotateNext() } else { showSwitcher() }
-            }
-        }
-    default:
-        break
+// MARK: - Settings Window
+var settingsWindow: NSWindow?
+
+func showSettings() {
+    if let existing = settingsWindow, existing.isVisible {
+        existing.makeKeyAndOrderFront(nil)
+        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+        return
     }
+    
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 340, height: 320),
+        styleMask: [.titled, .closable],
+        backing: .buffered,
+        defer: false
+    )
+    window.title = "CubeTab 设置"
+    window.contentView = NSHostingView(rootView: SettingsView())
+    window.isReleasedWhenClosed = false
+    
+    if let screen = NSScreen.main {
+        let sf = screen.visibleFrame
+        let wf = window.frame
+        window.setFrameOrigin(NSPoint(x: sf.midX - wf.width / 2, y: sf.midY - wf.height / 2))
+    }
+    
+    window.makeKeyAndOrderFront(nil)
+    NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+    settingsWindow = window
 }
 
+// MARK: - Status Bar
+var statusItem: NSStatusItem?
+
+func setupStatusBar() {
+    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    statusItem?.button?.image = NSImage(systemSymbolName: "cube.fill", accessibilityDescription: "CubeTab")
+    
+    let menu = NSMenu()
+    
+    let titleItem = NSMenuItem(title: "CubeTab v1.0", action: nil, keyEquivalent: "")
+    titleItem.isEnabled = false
+    menu.addItem(titleItem)
+    menu.addItem(NSMenuItem.separator())
+    
+    let settingsItem = NSMenuItem(title: "设置...", action: #selector(AppDelegate.showSettingsAction), keyEquivalent: ",")
+    settingsItem.target = AppDelegate.shared
+    menu.addItem(settingsItem)
+    
+    let accItem = NSMenuItem(title: "辅助功能权限", action: #selector(AppDelegate.checkAccessibility), keyEquivalent: "")
+    accItem.target = AppDelegate.shared
+    menu.addItem(accItem)
+    
+    menu.addItem(NSMenuItem.separator())
+    
+    let quitItem = NSMenuItem(title: "退出", action: #selector(AppDelegate.quit), keyEquivalent: "q")
+    quitItem.target = AppDelegate.shared
+    menu.addItem(quitItem)
+    
+    statusItem?.menu = menu
+}
+
+// MARK: - AppDelegate
 class AppDelegate: NSObject, NSApplicationDelegate {
+    static let shared = AppDelegate()
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         log("Launched")
+        setupStatusBar()
         setupKeyboard()
         if !AXIsProcessTrusted() {
             let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
             AXIsProcessTrustedWithOptions(opts)
         }
     }
+    
+    @objc func showSettingsAction() {
+        showSettings()
+    }
+    
+    @objc func checkAccessibility() {
+        let alert = NSAlert()
+        if AXIsProcessTrusted() {
+            alert.messageText = "辅助功能权限已启用"
+            alert.informativeText = "使用 Command + esc 呼出切换器。\n按住 ⌘ 不放，每按一次 esc 切换下一个应用。\n松开 ⌘ 激活当前应用。"
+            alert.alertStyle = .informational
+        } else {
+            alert.messageText = "需要辅助功能权限"
+            alert.informativeText = "请在系统设置中启用 CubeTab 的辅助功能权限。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "打开系统设置")
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+            }
+            return
+        }
+        alert.runModal()
+    }
+    
+    @objc func quit() {
+        NSApplication.shared.terminate(nil)
+    }
 }
 
+// MARK: - Main
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-app.delegate = AppDelegate()
+app.delegate = AppDelegate.shared
 app.run()
