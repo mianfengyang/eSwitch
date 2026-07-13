@@ -165,6 +165,9 @@ struct AppCardView: View {
     let app: AppInfo
     let isFront: Bool
     
+    @State private var hover = false
+    @State private var sweepAngle: Double = 0
+    
     var body: some View {
         VStack(spacing: 10) {
             if let icon = app.icon {
@@ -185,7 +188,7 @@ struct AppCardView: View {
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 12)
-        .frame(width: 140, height: 140)
+        .frame(width: 120, height: 120)
         .background(
             Group {
                 if isFront {
@@ -290,6 +293,52 @@ struct AppCardView: View {
         .scaleEffect(isFront ? 1.0 : 0.78)
         .opacity(isFront ? 1.0 : 0.55)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFront)
+        // 顺时针白光流动动画
+        .overlay(
+            isFront ? ZStack {
+                // 白光弧线沿边框流动
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(
+                        AngularGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: .white.opacity(0.1), location: 0.42),
+                                .init(color: .white.opacity(0.6), location: 0.47),
+                                .init(color: .white.opacity(1.0), location: 0.50),
+                                .init(color: .white.opacity(0.6), location: 0.53),
+                                .init(color: .white.opacity(0.1), location: 0.58),
+                                .init(color: .clear, location: 1.0)
+                            ]),
+                            center: .center
+                        ),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(sweepAngle))
+                    .padding(-1)
+                // 光点沿边框移动
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 5, height: 5)
+                    .shadow(color: .white, radius: 6)
+                    .offset(
+                        x: 57 * cos((sweepAngle - 90) * .pi / 180),
+                        y: 57 * sin((sweepAngle - 90) * .pi / 180)
+                    )
+            }
+            .allowsHitTesting(false)
+            .task(id: isFront) {
+                guard isFront else { return }
+                sweepAngle = 0
+                while !Task.isCancelled {
+                    withAnimation(.linear(duration: 1.8)) {
+                        sweepAngle = 360
+                    }
+                    try? await Task.sleep(nanoseconds: 1_800_000_000)
+                    sweepAngle = 0
+                }
+            }
+            : nil
+        )
     }
 }
 
@@ -304,9 +353,9 @@ struct IndexedCard: View {
         let off = normalizedOffset
         return AppCardView(app: app, isFront: index == currentIndex)
             .frame(width: width)
-            .offset(x: CGFloat(off) * width * 0.38)
-            .scaleEffect(off == 0 ? 1.0 : abs(off) == 1 ? 0.8 : 0.6)
-            .opacity(off == 0 ? 1.0 : abs(off) == 1 ? 0.75 : 0.35)
+            .offset(x: CGFloat(off) * width * 0.45)
+            .scaleEffect(off == 0 ? 1.0 : 0.8)
+            .opacity(off == 0 ? 1.0 : abs(off) == 1 ? 0.75 : 0.0)
             .zIndex(index == currentIndex ? 10.0 : 5.0 - Double(abs(off)))
     }
     
@@ -327,7 +376,7 @@ struct SwitcherView: View {
                     Image(systemName: "app.fill").font(.system(size: 40)).foregroundColor(.secondary)
                     Text("没有可切换的应用").foregroundColor(.secondary).padding(.top, 8)
                 }
-                .frame(width: 700, height: 400)            } else {
+                .frame(width: 480, height: 300)            } else {
                 GeometryReader { geo in
                     ZStack {
                         ForEach(currentApps.indices, id: \.self) { i in
@@ -342,7 +391,7 @@ struct SwitcherView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(width: 700, height: 400)
+                .frame(width: 480, height: 300)
             }
         }
     }
@@ -374,7 +423,7 @@ func showSwitcher() {
     
     if switchPanel == nil {
         let panel = SwitchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered, defer: false
         )
@@ -389,7 +438,7 @@ func showSwitcher() {
         panel.contentView = NSHostingView(rootView: SwitcherView(state: cubeState))
         if let screen = NSScreen.main {
             let sf = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: sf.midX - 350, y: sf.midY - 200))
+            panel.setFrameOrigin(NSPoint(x: sf.midX - 240, y: sf.midY - 150))
         }
         switchPanel = panel
     }

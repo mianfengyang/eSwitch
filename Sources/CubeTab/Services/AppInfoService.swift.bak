@@ -1,0 +1,28 @@
+import AppKit
+
+class AppInfoService {
+    static let shared = AppInfoService()
+    
+    private init() {}
+    
+    func getRunningApps() -> [AppInfo] {
+        let workspace = NSWorkspace.shared
+        let runningApps = workspace.runningApplications
+        
+        let filteredApps = runningApps.filter { app in
+            app.activationPolicy == .regular &&
+            app.bundleIdentifier != Bundle.main.bundleIdentifier &&
+            app.bundleIdentifier != "com.apple.finder" &&
+            app.localizedName != nil
+        }
+        
+        return filteredApps.map { AppInfo(app: $0) }
+    }
+    
+    func activateApp(_ appInfo: AppInfo) {
+        guard let app = NSRunningApplication(processIdentifier: appInfo.pid) else {
+            return
+        }
+        app.activate(options: [.activateIgnoringOtherApps])
+    }
+}

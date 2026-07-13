@@ -1,0 +1,17 @@
+import AppKit
+
+struct AppInfo: Identifiable {
+    let id: String
+    let name: String
+    let icon: NSImage?
+    let bundleID: String
+    let pid: pid_t
+    
+    init(app: NSRunningApplication) {
+        self.id = app.bundleIdentifier ?? UUID().uuidString
+        self.name = app.localizedName ?? "Unknown"
+        self.icon = app.icon
+        self.bundleID = app.bundleIdentifier ?? ""
+        self.pid = app.processIdentifier
+    }
+}

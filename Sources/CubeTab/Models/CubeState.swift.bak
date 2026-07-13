@@ -1,0 +1,43 @@
+import Foundation
+
+class CubeState: ObservableObject {
+    @Published var currentIndex: Int = 0
+    @Published var rotationAngle: Double = 0
+    @Published var isVisible: Bool = false
+    
+    private var apps: [AppInfo] = []
+    
+    var currentApp: AppInfo? {
+        guard !apps.isEmpty, currentIndex >= 0, currentIndex < apps.count else {
+            return nil
+        }
+        return apps[currentIndex]
+    }
+    
+    var appCount: Int {
+        apps.count
+    }
+    
+    func setApps(_ newApps: [AppInfo]) {
+        apps = newApps
+        currentIndex = 0
+        rotationAngle = 0
+    }
+    
+    func rotateToNext() {
+        guard !apps.isEmpty else { return }
+        currentIndex = (currentIndex + 1) % apps.count
+        rotationAngle += 90
+    }
+    
+    func rotateToPrevious() {
+        guard !apps.isEmpty else { return }
+        currentIndex = (currentIndex - 1 + apps.count) % apps.count
+        rotationAngle -= 90
+    }
+    
+    func reset() {
+        currentIndex = 0
+        rotationAngle = 0
+    }
+}

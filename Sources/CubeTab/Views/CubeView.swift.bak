@@ -1,0 +1,87 @@
+import SwiftUI
+
+struct CubeView: View {
+    @ObservedObject var cubeState: CubeState
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.5)
+                
+                if cubeState.appCount > 0 {
+                    cubeContent(in: geometry)
+                } else {
+                    noAppsView
+                }
+            }
+        }
+        .ignoresSafeArea()
+    }
+    
+    private func cubeContent(in geometry: GeometryProxy) -> some View {
+        let size = min(geometry.size.width, geometry.size.height) * 0.4
+        let perspective: Double = 800
+        
+        return ZStack {
+            ForEach(0..<cubeState.appCount, id: \.self) { index in
+                if let app = getApp(at: index) {
+                    CubeFaceView(appInfo: app, isCurrentFace: index == cubeState.currentIndex)
+                        .rotation3DEffect(
+                            .degrees(Double(index) * 90),
+                            axis: (x: 0, y: 1, z: 0),
+                            anchor: .center,
+                            anchorZ: 0,
+                            perspective: perspective / size
+                        )
+                }
+            }
+        }
+        .rotation3DEffect(
+            .degrees(cubeState.rotationAngle),
+            axis: (x: 0, y: 1, z: 0),
+            anchor: .center,
+            anchorZ: 0,
+            perspective: perspective / size
+        )
+    }
+    
+    private var noAppsView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "app.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.gray)
+            
+            Text("没有可切换的应用")
+                .font(.title3)
+                .foregroundColor(.gray)
+        }
+    }
+    
+    private func getApp(at index: Int) -> AppInfo? {
+        guard index >= 0, index < cubeState.appCount else {
+            return nil
+        }
+        
+        var appIndex = index
+        if cubeState.currentIndex + index >= cubeState.appCount {
+            appIndex = (cubeState.currentIndex + index) % cubeState.appCount
+        } else {
+            appIndex = cubeState.currentIndex + index
+        }
+        
+        return getAppInfo(at: appIndex)
+    }
+    
+    private func getAppInfo(at index: Int) -> AppInfo? {
+        guard index >= 0, index < cubeState.appCount else {
+            return nil
+        }
+        
+        let runningApps = AppInfoService.shared.getRunningApps()
+        guard index < runningApps.count else {
+            return nil
+        }
+        
+        return runningApps[index]
+    }
+}
