@@ -187,14 +187,106 @@ struct AppCardView: View {
         .padding(.horizontal, 12)
         .frame(width: 140, height: 140)
         .background(
-            RoundedRectangle(cornerRadius: 18)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(isFront ? 0.25 : 0.08), radius: isFront ? 12 : 4)
+            Group {
+                if isFront {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.25),
+                                    Color.white.opacity(0.08),
+                                    Color.white.opacity(0.15),
+                                    Color.white.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.3), .clear],
+                                        startPoint: .top,
+                                        endPoint: .center
+                                    )
+                                )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.clear, .white.opacity(0.1)],
+                                        startPoint: .center,
+                                        endPoint: .bottom
+                                    )
+                                )
+                        )
+                } else {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(.ultraThinMaterial)
+                }
+            }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(isFront ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 2)
+            Group {
+                if isFront {
+                    // 外层白色高光边框
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.9),
+                                    .white.opacity(0.4),
+                                    .white.opacity(0.7),
+                                    .white.opacity(0.3),
+                                    .white.opacity(0.8)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 2
+                        )
+                    // 内层高光边框
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(
+                            LinearGradient(
+                                colors: [.white.opacity(0.3), .clear, .white.opacity(0.2)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                        .padding(2)
+                    // 顶部高光反射
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(
+                            LinearGradient(
+                                colors: [.white.opacity(0.4), .white.opacity(0.1), .clear],
+                                startPoint: .top,
+                                endPoint: .center
+                            )
+                        )
+                        .padding(.top, 1)
+                        .frame(height: 35)
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                    // 左上角高光点
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [.white.opacity(0.6), .clear],
+                                center: .center,
+                                startRadius: 0,
+                                endRadius: 15
+                            )
+                        )
+                        .frame(width: 30, height: 30)
+                        .offset(x: -35, y: -45)
+                }
+            }
         )
+        .shadow(color: isFront ? .white.opacity(0.5) : .clear, radius: 10, x: 0, y: 0)
+        .shadow(color: isFront ? .black.opacity(0.3) : .clear, radius: 8, x: 0, y: 4)
         .scaleEffect(isFront ? 1.0 : 0.78)
         .opacity(isFront ? 1.0 : 0.55)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFront)
