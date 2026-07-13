@@ -165,9 +165,6 @@ struct AppCardView: View {
     let app: AppInfo
     let isFront: Bool
     
-    @State private var hover = false
-    @State private var sweepAngle: Double = 0
-    
     var body: some View {
         VStack(spacing: 10) {
             if let icon = app.icon {
@@ -175,7 +172,6 @@ struct AppCardView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 72, height: 72)
-                    .shadow(color: .black.opacity(0.2), radius: 4)
             } else {
                 Image(systemName: "app.fill")
                     .font(.system(size: 56))
@@ -189,156 +185,46 @@ struct AppCardView: View {
         .padding(.vertical, 16)
         .padding(.horizontal, 12)
         .frame(width: 120, height: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
         .background(
             Group {
                 if isFront {
                     RoundedRectangle(cornerRadius: 18)
                         .fill(
                             LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.25),
-                                    Color.white.opacity(0.08),
-                                    Color.white.opacity(0.15),
-                                    Color.white.opacity(0.05)
-                                ],
+                                colors: [.white.opacity(0.22), .white.opacity(0.08), .white.opacity(0.14)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.white.opacity(0.3), .clear],
-                                        startPoint: .top,
-                                        endPoint: .center
-                                    )
-                                )
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.clear, .white.opacity(0.1)],
-                                        startPoint: .center,
-                                        endPoint: .bottom
-                                    )
-                                )
-                        )
                 } else {
                     RoundedRectangle(cornerRadius: 18)
-                        .fill(.ultraThinMaterial)
+                        .fill(Color.white.opacity(0.12))
                 }
             }
         )
         .overlay(
             Group {
                 if isFront {
-                    // 外层白色高光边框
                     RoundedRectangle(cornerRadius: 18)
                         .stroke(
                             LinearGradient(
-                                colors: [
-                                    .white.opacity(0.9),
-                                    .white.opacity(0.4),
-                                    .white.opacity(0.7),
-                                    .white.opacity(0.3),
-                                    .white.opacity(0.8)
-                                ],
+                                colors: [.white.opacity(0.85), .white.opacity(0.35), .white.opacity(0.7)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ),
                             lineWidth: 2
                         )
-                    // 内层高光边框
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(
-                            LinearGradient(
-                                colors: [.white.opacity(0.3), .clear, .white.opacity(0.2)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                        .padding(2)
-                    // 顶部高光反射
-                    RoundedRectangle(cornerRadius: 18)
-                        .fill(
-                            LinearGradient(
-                                colors: [.white.opacity(0.4), .white.opacity(0.1), .clear],
-                                startPoint: .top,
-                                endPoint: .center
-                            )
-                        )
-                        .padding(.top, 1)
-                        .frame(height: 35)
-                        .clipShape(RoundedRectangle(cornerRadius: 18))
-                    // 左上角高光点
                     Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [.white.opacity(0.6), .clear],
-                                center: .center,
-                                startRadius: 0,
-                                endRadius: 15
-                            )
-                        )
-                        .frame(width: 30, height: 30)
+                        .fill(Color.white.opacity(0.5))
+                        .frame(width: 20, height: 20)
                         .offset(x: -35, y: -45)
+                        .blur(radius: 4)
                 }
             }
         )
-        .shadow(color: isFront ? .white.opacity(0.5) : .clear, radius: 10, x: 0, y: 0)
-        .shadow(color: isFront ? .black.opacity(0.3) : .clear, radius: 8, x: 0, y: 4)
-        .scaleEffect(isFront ? 1.0 : 0.78)
-        .opacity(isFront ? 1.0 : 0.55)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFront)
-        // 顺时针白光流动动画
-        .overlay(
-            isFront ? ZStack {
-                // 白光弧线沿边框流动
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(
-                        AngularGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: .clear, location: 0),
-                                .init(color: .white.opacity(0.1), location: 0.42),
-                                .init(color: .white.opacity(0.6), location: 0.47),
-                                .init(color: .white.opacity(1.0), location: 0.50),
-                                .init(color: .white.opacity(0.6), location: 0.53),
-                                .init(color: .white.opacity(0.1), location: 0.58),
-                                .init(color: .clear, location: 1.0)
-                            ]),
-                            center: .center
-                        ),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(sweepAngle))
-                    .padding(-1)
-                // 光点沿边框移动
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 5, height: 5)
-                    .shadow(color: .white, radius: 6)
-                    .offset(
-                        x: 57 * cos((sweepAngle - 90) * .pi / 180),
-                        y: 57 * sin((sweepAngle - 90) * .pi / 180)
-                    )
-            }
-            .allowsHitTesting(false)
-            .task(id: isFront) {
-                guard isFront else { return }
-                sweepAngle = 0
-                while !Task.isCancelled {
-                    withAnimation(.linear(duration: 1.8)) {
-                        sweepAngle = 360
-                    }
-                    try? await Task.sleep(nanoseconds: 1_800_000_000)
-                    sweepAngle = 0
-                }
-            }
-            : nil
-        )
+        .shadow(color: isFront ? .white.opacity(0.4) : .clear, radius: 8, x: 0, y: 0)
+        .shadow(color: isFront ? .black.opacity(0.25) : .clear, radius: 6, x: 0, y: 3)
     }
 }
 
@@ -354,9 +240,10 @@ struct IndexedCard: View {
         return AppCardView(app: app, isFront: index == currentIndex)
             .frame(width: width)
             .offset(x: CGFloat(off) * width * 0.45)
-            .scaleEffect(off == 0 ? 1.0 : 0.8)
+            .scaleEffect(off == 0 ? 1.0 : 0.78)
             .opacity(off == 0 ? 1.0 : abs(off) == 1 ? 0.75 : 0.0)
             .zIndex(index == currentIndex ? 10.0 : 5.0 - Double(abs(off)))
+            .animation(.easeInOut(duration: 0.25), value: currentIndex)
     }
     
     private var normalizedOffset: Int {
