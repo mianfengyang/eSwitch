@@ -203,26 +203,12 @@ struct AppCardView: View {
                 }
             }
         )
-        .overlay(
-            Group {
-                if isFront {
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(
-                            LinearGradient(
-                                colors: [.white.opacity(0.85), .white.opacity(0.35), .white.opacity(0.7)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 2
-                        )
-                    Circle()
-                        .fill(Color.white.opacity(0.5))
-                        .frame(width: 20, height: 20)
-                        .offset(x: -35, y: -45)
-                        .blur(radius: 4)
-                }
+        .overlay {
+            if isFront {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.white, lineWidth: 3)
             }
-        )
+        }
         .shadow(color: isFront ? .white.opacity(0.4) : .clear, radius: 8, x: 0, y: 0)
         .shadow(color: isFront ? .black.opacity(0.25) : .clear, radius: 6, x: 0, y: 3)
     }
