@@ -15,6 +15,14 @@ func log(_ msg: String) {
     }
 }
 
+// MARK: - Panel Screen Mode
+enum PanelScreenMode: String, CaseIterable {
+    case mainScreen = "主屏幕"
+    case followCursor = "跟随光标所在屏"
+    
+    var description: String { rawValue }
+}
+
 // MARK: - Settings Manager
 class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
@@ -26,8 +34,20 @@ class SettingsManager: ObservableObject {
         }
     }
     
+    @Published var panelScreenMode: PanelScreenMode {
+        didSet {
+            UserDefaults.standard.set(panelScreenMode.rawValue, forKey: "panelScreenMode")
+        }
+    }
+    
     private init() {
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
+        if let savedRaw = UserDefaults.standard.string(forKey: "panelScreenMode"),
+           let mode = PanelScreenMode(rawValue: savedRaw) {
+            self.panelScreenMode = mode
+        } else {
+            self.panelScreenMode = .mainScreen  // default: main screen
+        }
     }
     
     private func setLaunchAtLogin(_ enabled: Bool) {
@@ -100,11 +120,18 @@ struct SettingsView: View {
                 Toggle("开机自启动", isOn: $settings.launchAtLogin)
                     .toggleStyle(.switch)
                     .padding(.vertical, 4)
+
+                Picker("面板屏幕", selection: $settings.panelScreenMode) {
+                    ForEach(PanelScreenMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.description).tag(mode)
+                    }
+                }
+                .pickerStyle(.radioGroup)
             }
             .padding()
-            
+
             Divider()
-            
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("快捷键")
                     .font(.subheadline.weight(.medium))
@@ -270,6 +297,24 @@ struct SwitcherView: View {
     }
 }
 
+// MARK: - Panel Screen Helper
+func getTargetScreen() -> NSScreen {
+    switch SettingsManager.shared.panelScreenMode {
+    case .mainScreen:
+        // NSScreen.main tracks the cursor, so use screens.first for a stable primary display
+        return NSScreen.screens.first ?? NSScreen.main ?? NSScreen.screens[0]
+    case .followCursor:
+        let location = NSEvent.mouseLocation
+        for screen in NSScreen.screens {
+            if NSMouseInRect(location, screen.frame, false) {
+                return screen
+            }
+        }
+        // Fallback to main if cursor not found on any screen
+        return NSScreen.main ?? NSScreen.screens[0]
+    }
+}
+
 // MARK: - Panel
 class SwitchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -309,12 +354,13 @@ func showSwitcher() {
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.contentView = NSHostingView(rootView: SwitcherView(state: cubeState))
-        if let screen = NSScreen.main {
-            let sf = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: sf.midX - 240, y: sf.midY - 150))
-        }
         switchPanel = panel
     }
+
+    // Always reposition when showing (settings may have changed)
+    let screen = getTargetScreen()
+    let sf = screen.visibleFrame
+    switchPanel?.setFrameOrigin(NSPoint(x: sf.midX - 240, y: sf.midY - 150))
     
     switchPanel?.orderFront(nil)
 }
