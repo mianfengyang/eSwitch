@@ -13,12 +13,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CubeTab",
-            path: "Sources/CubeTab",
-            exclude: [
-                "Resources/Info.plist",
-                "Resources/Assets.xcassets",
-                "CubeTab.entitlements"
-            ],
+            exclude: ["Resources/Info.plist", "Resources/Assets.xcassets", "CubeTab.entitlements", "Resources/CubeTab.icns"],
+
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Cocoa"),

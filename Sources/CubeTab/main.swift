@@ -146,6 +146,11 @@ struct SettingsView: View {
                     Text("松开 ⌘ 键")
                         .foregroundColor(.secondary)
                 }
+                HStack {
+                    Text("反向切换")
+                    Spacer()
+                    KeyboardShortcutLabel(keys: ["⌘", "⇧", "esc"])
+                }
             }
             .padding()
             
@@ -386,8 +391,16 @@ func rotateNext() {
     log("rotate -> \(currentIndex): \(currentApps[currentIndex].name)")
 }
 
+func rotatePrev() {
+    guard !currentApps.isEmpty else { return }
+    currentIndex = (currentIndex - 1 + currentApps.count) % currentApps.count
+    cubeState.index = currentIndex
+    log("rotate <- \(currentIndex): \(currentApps[currentIndex].name)")
+}
+
 // MARK: - Keyboard
 var isCmdDown = false
+var isShiftDown = false
 
 func setupKeyboard() {
     log("Setting up keyboard...")
@@ -406,6 +419,10 @@ func setupKeyboard() {
             let cmd = flags.contains(.maskCommand)
             
             if type == .flagsChanged {
+                let shift = flags.contains(.maskShift)
+                if shift != isShiftDown {
+                    isShiftDown = shift
+                }
                 if cmd && !isCmdDown {
                     isCmdDown = true
                 } else if !cmd && isCmdDown {
@@ -416,7 +433,11 @@ func setupKeyboard() {
                 }
             } else if type == .keyDown && isCmdDown && keyCode == 53 {
                 DispatchQueue.main.async {
-                    if isVisible { rotateNext() } else { showSwitcher() }
+                    if isVisible {
+                        if isShiftDown { rotatePrev() } else { rotateNext() }
+                    } else {
+                        showSwitcher()
+                    }
                 }
                 return nil
             }
