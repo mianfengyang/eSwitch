@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import SwiftUI
 import ServiceManagement
 
@@ -23,6 +24,99 @@ enum PanelScreenMode: String, CaseIterable {
     var description: String { rawValue }
 }
 
+// MARK: - Hotkey
+struct Hotkey: Codable, Equatable {
+    /// 修饰键掩码: 1=⌘, 2=⇧, 4=⌥, 8=⌃
+    var modifiers: Int
+    /// 虚拟按键码（物理键位，与键盘布局无关）
+    var keyCode: Int
+    /// 显示名称（录制时按当前键盘布局获取，仅用于展示）
+    var displayName: String
+    
+    static let command = 1
+    static let shift = 2
+    static let option = 4
+    static let control = 8
+    
+    static let escKeyCode = 53
+    
+    static let defaultShow = Hotkey(modifiers: command, keyCode: escKeyCode, displayName: "esc")
+    static let defaultPrev = Hotkey(modifiers: command | shift, keyCode: escKeyCode, displayName: "esc")
+    
+    /// 修饰键符号，按 macOS 习惯顺序：⌃ ⌥ ⇧ ⌘
+    var modifierString: String {
+        var s = ""
+        if modifiers & Self.control != 0 { s += "⌃" }
+        if modifiers & Self.option != 0 { s += "⌥" }
+        if modifiers & Self.shift != 0 { s += "⇧" }
+        if modifiers & Self.command != 0 { s += "⌘" }
+        return s
+    }
+    
+    /// 完整显示文本，如 "⌘ esc"
+    var displayString: String {
+        guard !modifierString.isEmpty else { return displayName }
+        return modifierString + " " + displayName
+    }
+    
+    /// 「选择应用」行的提示文本
+    var releaseHint: String {
+        guard !modifierString.isEmpty else { return "松开修饰键" }
+        if modifierString.count == 1 { return "松开 \(modifierString) 键" }
+        return "松开全部修饰键（\(modifierString)）"
+    }
+    
+    /// 把 NSEvent 修饰键转成掩码
+    static func mask(_ flags: NSEvent.ModifierFlags) -> Int {
+        var m = 0
+        if flags.contains(.command) { m |= command }
+        if flags.contains(.shift) { m |= shift }
+        if flags.contains(.option) { m |= option }
+        if flags.contains(.control) { m |= control }
+        return m
+    }
+    
+    /// 把 CGEvent 修饰键转成掩码
+    static func mask(_ flags: CGEventFlags) -> Int {
+        var m = 0
+        if flags.contains(.maskCommand) { m |= command }
+        if flags.contains(.maskShift) { m |= shift }
+        if flags.contains(.maskAlternate) { m |= option }
+        if flags.contains(.maskControl) { m |= control }
+        return m
+    }
+    
+    /// 特殊按键的显示名（不依赖键盘布局）
+    static let specialKeyNames: [Int: String] = [
+        36: "↩",      // Return
+        48: "⇥",      // Tab
+        49: "Space",  // Space
+        51: "⌫",      // Delete (Backspace)
+        53: "esc",    // Escape
+        63: "fn",     // Function
+        64: "F17",
+        76: "↩",      // Keypad Enter
+        96: "F5", 97: "F6", 98: "F7", 99: "F3", 100: "F8", 101: "F9",
+        103: "F11", 105: "F13", 106: "F16", 107: "F14", 109: "F10",
+        110: "菜单", 114: "帮助", 115: "Home", 116: "PgUp", 117: "⌦",
+        118: "F4", 119: "End", 120: "F2", 121: "PgDn", 122: "F1",
+        123: "←", 124: "→", 125: "↓", 126: "↑"
+    ]
+    
+    /// 生成按键显示名：优先特殊键表，其次取录制时的按键字符
+    static func displayName(for keyCode: Int, characters: String?) -> String {
+        if let special = specialKeyNames[keyCode] { return special }
+        if let ch = characters?.first, ch.isASCII, ch >= " " {
+            return ch.uppercased()
+        }
+        if let ch = characters, ch.count == 1,
+           let sc = ch.unicodeScalars.first, sc.value >= 0x21, sc.value != 0x7F {
+            return ch
+        }
+        return "Key \(keyCode)"
+    }
+}
+
 // MARK: - Settings Manager
 class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
@@ -40,6 +134,18 @@ class SettingsManager: ObservableObject {
         }
     }
     
+    @Published var showHotkey: Hotkey {
+        didSet {
+            saveHotkey(showHotkey, key: "hotkeyShow")
+        }
+    }
+    
+    @Published var prevHotkey: Hotkey {
+        didSet {
+            saveHotkey(prevHotkey, key: "hotkeyPrev")
+        }
+    }
+    
     private init() {
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         if let savedRaw = UserDefaults.standard.string(forKey: "panelScreenMode"),
@@ -47,6 +153,22 @@ class SettingsManager: ObservableObject {
             self.panelScreenMode = mode
         } else {
             self.panelScreenMode = .mainScreen  // default: main screen
+        }
+        self.showHotkey = Self.loadHotkey(key: "hotkeyShow", fallback: .defaultShow)
+        self.prevHotkey = Self.loadHotkey(key: "hotkeyPrev", fallback: .defaultPrev)
+    }
+    
+    private static func loadHotkey(key: String, fallback: Hotkey) -> Hotkey {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let hk = try? JSONDecoder().decode(Hotkey.self, from: data) else {
+            return fallback
+        }
+        return hk
+    }
+    
+    private func saveHotkey(_ hk: Hotkey, key: String) {
+        if let data = try? JSONEncoder().encode(hk) {
+            UserDefaults.standard.set(data, forKey: key)
         }
     }
     
@@ -132,25 +254,28 @@ struct SettingsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("快捷键")
                     .font(.subheadline.weight(.medium))
-                HStack {
-                    Text("呼出/切换")
-                    Spacer()
-                    KeyboardShortcutLabel(keys: ["⌘", "esc"])
-                }
+                HotkeyRecorderView(
+                    label: "呼出/切换",
+                    hotkey: $settings.showHotkey,
+                    other: settings.prevHotkey
+                )
+                HotkeyRecorderView(
+                    label: "反向切换",
+                    hotkey: $settings.prevHotkey,
+                    other: settings.showHotkey
+                )
                 HStack {
                     Text("选择应用")
                     Spacer()
-                    Text("松开 ⌘ 键")
+                    Text(settings.showHotkey.releaseHint)
                         .foregroundColor(.secondary)
                 }
-                HStack {
-                    Text("反向切换")
-                    Spacer()
-                    KeyboardShortcutLabel(keys: ["⌘", "⇧", "esc"])
-                }
+                Text("点击右侧按钮后按下新的组合键即可重新录制，按 Esc 取消")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             .padding()
             
@@ -165,30 +290,119 @@ struct SettingsView: View {
             }
             .padding(.vertical, 8)
         }
-        .frame(width: 340, height: 320)
+        .frame(width: 340, height: 359)
     }
 }
 
-struct KeyboardShortcutLabel: View {
-    let keys: [String]
+// MARK: - Hotkey Recorder
+struct HotkeyRecorderView: View {
+    let label: String
+    @Binding var hotkey: Hotkey
+    /// 另一个快捷键，用于检测冲突
+    let other: Hotkey
+    
+    @State private var recording = false
+    @State private var errorMessage: String?
+    
+    /// 全局「正在录制」的停止回调，保证同一时间只有一个录制器在工作
+    private static var activeStop: (() -> Void)?
     
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(keys, id: \.self) { key in
-                Text(key)
+        HStack {
+            Text(label)
+            Spacer()
+            Button(action: toggleRecording) {
+                Text(buttonText)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .foregroundColor(errorMessage != nil ? .red : .primary)
+                    .frame(minWidth: 110, alignment: .trailing)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
                     .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.gray.opacity(0.2))
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(recording ? Color.accentColor.opacity(0.15) : Color.gray.opacity(0.15))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(recording ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: 0.5)
                     )
             }
+            .buttonStyle(.plain)
+            .help(errorMessage ?? "点击后按下新的组合键")
         }
+        .onDisappear(perform: stopRecording)
+    }
+    
+    private var buttonText: String {
+        if recording { return "正在监听，按下快捷键…" }
+        if let errorMessage { return errorMessage }
+        return hotkey.displayString
+    }
+    
+    private func toggleRecording() {
+        if recording {
+            stopRecording()
+        } else {
+            // 若还有别的录制器在工作，先停掉它
+            Self.activeStop?()
+            errorMessage = nil
+            recording = true
+            log("Recorder[\(label)] start")
+            // 录制期间暂停全局事件监听，避免旧快捷键在窗口内被触发
+            setHotkeyTapEnabled(false)
+            if let token = NSEvent.addLocalMonitorForEvents(matching: [.keyDown], handler: { event in
+                log("Recorder[\(self.label)] keyDown keyCode=\(event.keyCode) chars='\(event.characters ?? "?")' ignoringMods='\(event.charactersIgnoringModifiers ?? "?")' mask=\(Hotkey.mask(event.modifierFlags))")
+                self.handleRecordedEvent(event)
+                return nil  // 吞掉按键，避免触发系统/应用快捷键
+            }) {
+                Self.activeStop = {
+                    log("Recorder[\(self.label)] stop")
+                    NSEvent.removeMonitor(token)
+                    self.recording = false
+                    setHotkeyTapEnabled(true)
+                }
+            } else {
+                log("Recorder[\(label)] FAILED to add monitor")
+                errorMessage = "无法注册键盘监听"
+                recording = false
+                setHotkeyTapEnabled(true)
+            }
+        }
+    }
+
+    private func handleRecordedEvent(_ event: NSEvent) {
+        let mask = Hotkey.mask(event.modifierFlags)
+        // 单独按 Esc = 取消录制
+        if Int(event.keyCode) == Hotkey.escKeyCode && mask == 0 {
+            log("Recorder[\(label)] cancelled by Esc")
+            errorMessage = nil
+            stopRecording()
+            return
+        }
+        guard mask != 0 else {
+            log("Recorder[\(label)] rejected: no modifier")
+            errorMessage = "需包含修饰键 (⌘/⌥/⌃/⇧)"
+            stopRecording()
+            return
+        }
+        let keyCode = Int(event.keyCode)
+        if other.modifiers == mask && other.keyCode == keyCode {
+            log("Recorder[\(label)] rejected: conflicts with other hotkey")
+            errorMessage = "与另一快捷键冲突"
+            stopRecording()
+            return
+        }
+        let name = Hotkey.displayName(for: keyCode, characters: event.charactersIgnoringModifiers)
+        hotkey = Hotkey(modifiers: mask, keyCode: keyCode, displayName: name)
+        log("Recorder[\(label)] SAVED \(mask)+\(keyCode) '\(name)'")
+        stopRecording()
+    }
+    
+    private func stopRecording() {
+        guard recording else { return }
+        Self.activeStop?()
+        Self.activeStop = nil
+        recording = false
     }
 }
 
@@ -370,12 +584,12 @@ func showSwitcher() {
     switchPanel?.orderFront(nil)
 }
 
-func hideSwitcher() {
-    log("hideSwitcher")
+func hideSwitcher(activate: Bool = true) {
+    log("hideSwitcher(activate: \(activate))")
     isVisible = false
     switchPanel?.orderOut(nil)
     
-    if !currentApps.isEmpty && currentIndex < currentApps.count {
+    if activate, !currentApps.isEmpty && currentIndex < currentApps.count {
         let target = currentApps[currentIndex]
         lastSelectedBundleID = target.id
         if let app = NSRunningApplication(processIdentifier: target.pid) {
@@ -399,8 +613,13 @@ func rotatePrev() {
 }
 
 // MARK: - Keyboard
-var isCmdDown = false
-var isShiftDown = false
+var globalEventTap: CFMachPort?
+
+/// 录制快捷键期间暂停/恢复全局事件监听
+func setHotkeyTapEnabled(_ enabled: Bool) {
+    guard let tap = globalEventTap else { return }
+    CGEvent.tapEnable(tap: tap, enable: enabled)
+}
 
 func setupKeyboard() {
     log("Setting up keyboard...")
@@ -414,32 +633,53 @@ func setupKeyboard() {
         options: .defaultTap,
         eventsOfInterest: mask,
         callback: { proxy, type, event, refcon -> Unmanaged<CGEvent>? in
-            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            let flags = event.flags
-            let cmd = flags.contains(.maskCommand)
+            // 系统因超时/用户输入而禁用 tap 时自动恢复
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let tap = globalEventTap {
+                    CGEvent.tapEnable(tap: tap, enable: true)
+                }
+                return Unmanaged.passUnretained(event)
+            }
+            
+            let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+            let mods = Hotkey.mask(event.flags)
             
             if type == .flagsChanged {
-                let shift = flags.contains(.maskShift)
-                if shift != isShiftDown {
-                    isShiftDown = shift
+                // 切换器显示时：呼出快捷键的全部修饰键被松开 = 确认选择
+                if isVisible {
+                    let showMods = SettingsManager.shared.showHotkey.modifiers
+                    if (mods & showMods) != showMods {
+                        DispatchQueue.main.async {
+                            if isVisible { hideSwitcher() }
+                        }
+                    }
                 }
-                if cmd && !isCmdDown {
-                    isCmdDown = true
-                } else if !cmd && isCmdDown {
-                    isCmdDown = false
+            } else if type == .keyDown {
+                let settings = SettingsManager.shared
+                let show = settings.showHotkey
+                let prev = settings.prevHotkey
+                
+                if mods != 0 || isVisible {
+                    log("Tap keyDown keyCode=\(keyCode) mods=\(mods) show=\(show.modifiers)+\(show.keyCode) prev=\(prev.modifiers)+\(prev.keyCode)")
+                }
+                
+                if mods == show.modifiers && keyCode == show.keyCode {
+                    // 呼出/切换：未显示则呼出，显示中则下一个
                     DispatchQueue.main.async {
-                        if isVisible { hideSwitcher() }
+                        if isVisible { rotateNext() } else { showSwitcher() }
                     }
-                }
-            } else if type == .keyDown && isCmdDown && keyCode == 53 {
-                DispatchQueue.main.async {
-                    if isVisible {
-                        if isShiftDown { rotatePrev() } else { rotateNext() }
-                    } else {
-                        showSwitcher()
+                    return nil
+                } else if isVisible && mods == prev.modifiers && keyCode == prev.keyCode {
+                    // 反向切换：上一个
+                    DispatchQueue.main.async { rotatePrev() }
+                    return nil
+                } else if isVisible && mods == 0 && keyCode == Hotkey.escKeyCode {
+                    // 切换器显示时单独按 Esc = 取消（不激活应用）
+                    DispatchQueue.main.async {
+                        if isVisible { hideSwitcher(activate: false) }
                     }
+                    return nil
                 }
-                return nil
             }
             
             return Unmanaged.passUnretained(event)
@@ -448,8 +688,9 @@ func setupKeyboard() {
     )
     
     if let tap = tap {
+        globalEventTap = tap
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         log("CGEvent tap OK")
     } else {
@@ -468,7 +709,7 @@ func showSettings() {
     }
     
     let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 340, height: 320),
+        contentRect: NSRect(x: 0, y: 0, width: 340, height: 359),
         styleMask: [.titled, .closable],
         backing: .buffered,
         defer: false
@@ -538,10 +779,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc func checkAccessibility() {
+        let hk = SettingsManager.shared.showHotkey
         let alert = NSAlert()
         if AXIsProcessTrusted() {
             alert.messageText = "辅助功能权限已启用"
-            alert.informativeText = "使用 Command + esc 呼出切换器。\n按住 ⌘ 不放，每按一次 esc 切换下一个应用。\n松开 ⌘ 激活当前应用。"
+            alert.informativeText = "使用 \(hk.displayString) 呼出切换器。\n按住 \(hk.modifierString)，每按一次按键切换到下一个应用。\n\(hk.releaseHint)激活当前应用。\n\n可在「设置...」中自定义快捷键。"
             alert.alertStyle = .informational
         } else {
             alert.messageText = "需要辅助功能权限"

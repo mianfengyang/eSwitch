@@ -1,8 +1,114 @@
+import AppKit
+import CoreGraphics
 import Testing
+import Foundation
 @testable import CubeTab
 
-@Test func example() async throws {
-    // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-    // Swift Testing Documentation
-    // https://developer.apple.com/documentation/testing
+@Suite("Hotkey 快捷键")
+struct HotkeyTests {
+    @Test("修饰键显示顺序为 ⌃⌥⇧⌘")
+    func modifierOrder() {
+        let all = Hotkey(modifiers: 15, keyCode: 53, displayName: "esc")
+        #expect(all.modifierString == "⌃⌥⇧⌘")
+        let cmdOnly = Hotkey(modifiers: 1, keyCode: 53, displayName: "esc")
+        #expect(cmdOnly.modifierString == "⌘")
+        let none = Hotkey(modifiers: 0, keyCode: 53, displayName: "esc")
+        #expect(none.modifierString == "")
+    }
+    
+    @Test("完整显示文本")
+    func displayString() {
+        let hk = Hotkey(modifiers: 2, keyCode: 49, displayName: "Space")
+        #expect(hk.displayString == "⇧ Space")
+        let both = Hotkey(modifiers: 3, keyCode: 49, displayName: "Space")
+        #expect(both.displayString == "⇧⌘ Space")
+        let bare = Hotkey(modifiers: 0, keyCode: 53, displayName: "esc")
+        #expect(bare.displayString == "esc")
+    }
+    
+    @Test("releaseHint 单/多修饰键")
+    func releaseHint() {
+        let single = Hotkey(modifiers: 1, keyCode: 53, displayName: "esc")
+        #expect(single.releaseHint == "松开 ⌘ 键")
+        let multi = Hotkey(modifiers: 3, keyCode: 53, displayName: "esc")
+        #expect(multi.releaseHint == "松开全部修饰键（⇧⌘）")
+    }
+    
+    @Test("JSON 序列化往返一致")
+    func codableRoundTrip() throws {
+        let hk = Hotkey(modifiers: 5, keyCode: 49, displayName: "Space")
+        let data = try JSONEncoder().encode(hk)
+        let decoded = try JSONDecoder().decode(Hotkey.self, from: data)
+        #expect(decoded == hk)
+    }
+    
+    @Test("NSEvent 修饰键转掩码")
+    func nseventMask() {
+        #expect(Hotkey.mask([.command, .shift]) == 3)
+        #expect(Hotkey.mask([.control, .option]) == 12)
+        #expect(Hotkey.mask(NSEvent.ModifierFlags([])) == 0)
+    }
+    
+    @Test("CGEvent 修饰键转掩码")
+    func cgeventMask() {
+        #expect(Hotkey.mask(CGEventFlags([.maskCommand, .maskAlternate])) == 5)
+        #expect(Hotkey.mask(CGEventFlags([])) == 0)
+    }
+    
+    @Test("特殊按键显示名")
+    func specialKeyNames() {
+        #expect(Hotkey.displayName(for: 53, characters: "\u{1B}") == "esc")
+        #expect(Hotkey.displayName(for: 49, characters: " ") == "Space")
+        #expect(Hotkey.displayName(for: 122, characters: "\u{FF5F}") == "F1")
+    }
+    
+    @Test("字母/数字键取录制字符")
+    func letterDisplayName() {
+        #expect(Hotkey.displayName(for: 0, characters: "a") == "A")
+        #expect(Hotkey.displayName(for: 18, characters: "1") == "1")
+    }
+    
+    @Test("默认快捷键")
+    func defaults() {
+        #expect(Hotkey.defaultShow == Hotkey(modifiers: 1, keyCode: 53, displayName: "esc"))
+        #expect(Hotkey.defaultPrev == Hotkey(modifiers: 3, keyCode: 53, displayName: "esc"))
+    }
+}
+
+@Suite("SettingsManager 快捷键持久化")
+struct SettingsHotkeyTests {
+    private let showKey = "hotkeyShow"
+    private let prevKey = "hotkeyPrev"
+    
+    private func cleanDefaults() {
+        UserDefaults.standard.removeObject(forKey: showKey)
+        UserDefaults.standard.removeObject(forKey: prevKey)
+    }
+    
+    @Test("无存储时回退默认值")
+    func fallbackToDefaults() {
+        let previousShow = UserDefaults.standard.data(forKey: showKey)
+        let previousPrev = UserDefaults.standard.data(forKey: prevKey)
+        defer {
+            if let p = previousShow { UserDefaults.standard.set(p, forKey: showKey) }
+            else { UserDefaults.standard.removeObject(forKey: showKey) }
+            if let p = previousPrev { UserDefaults.standard.set(p, forKey: prevKey) }
+            else { UserDefaults.standard.removeObject(forKey: prevKey) }
+        }
+        cleanDefaults()
+        // SettingsManager 是单例，只验证默认值与存储格式兼容
+        #expect(Hotkey.defaultShow.modifiers == 1)
+        #expect(Hotkey.defaultShow.keyCode == 53)
+        #expect(Hotkey.defaultPrev.modifiers == 3)
+    }
+    
+    @Test("存储格式可被回退逻辑解析")
+    func storedFormatIsDecodable() throws {
+        let hk = Hotkey(modifiers: 9, keyCode: 49, displayName: "Space")
+        let data = try JSONEncoder().encode(hk)
+        let decoded = try JSONDecoder().decode(Hotkey.self, from: data)
+        #expect(decoded.modifiers == 9)
+        #expect(decoded.keyCode == 49)
+        #expect(decoded.displayName == "Space")
+    }
 }
