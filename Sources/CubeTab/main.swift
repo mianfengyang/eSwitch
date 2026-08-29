@@ -654,11 +654,15 @@ struct IndexedCard: View {
     /// 相邻卡片中心距（与 80pt 卡片宽对应，环上略有重叠）
     private let slotWidth: CGFloat = 104
 
+    /// 中间卡片放大系数：放大后卡片栈底边与两侧卡片底边对齐
+    private let frontScale: CGFloat = 1.16
+
     var body: some View {
         let off = normalizedOffset
         let angle = Double(off) * ringPitch
         let visible = abs(off) <= 1
         return cardStack(front: off == 0)
+            .scaleEffect(off == 0 ? frontScale : 1.0)
             .rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
             .offset(x: CGFloat(off) * slotWidth, y: CGFloat(abs(off)) * 10)
             .opacity(visible ? 1.0 : 0.0)
@@ -670,19 +674,19 @@ struct IndexedCard: View {
     private func cardStack(front: Bool) -> some View {
         VStack(spacing: 6) {
             AppCardView(app: app, showBorder: front)
-            // 倒影：垂直翻转 + 渐变淡出 + 轻模糊，压暗
+            // 倒影：垂直翻转 + 上亮下暗渐变淡出 + 轻模糊
             AppCardView(app: app, showBorder: false)
                 .scaleEffect(y: -1)
                 .frame(height: 44, alignment: .top)
                 .clipped()
                 .mask(
                     LinearGradient(
-                        colors: [Color.white.opacity(0.5), .clear],
+                        colors: [Color.white.opacity(0.85), .clear],
                         startPoint: .top, endPoint: .bottom
                     )
                 )
-                .blur(radius: 1.5)
-                .opacity(0.35)
+                .blur(radius: 1)
+                .opacity(0.6)
                 .allowsHitTesting(false)
         }
     }
