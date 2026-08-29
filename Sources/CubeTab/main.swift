@@ -182,8 +182,15 @@ struct GlassContainer<Content: View>: View {
                         .clipShape(RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous))
                     GlassDimOverlay()
                 }
-                .shadow(color: .black.opacity(0.55), radius: 28, x: 0, y: 14)
-                .shadow(color: .black.opacity(0.30), radius: 10, x: 0, y: 4)
+            )
+            // 面板投影：先画圆角矩形再取其阴影，投影沿圆角轮廓生成。
+            // 不能直接对上面的 ZStack 用 .shadow() —— 内含 NSViewRepresentable 模糊视图时
+            // 按矩形边界投影，四角会露出直角阴影。
+            .background(
+                RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
+                    .fill(Color.black)
+                    .shadow(color: .black.opacity(0.55), radius: 28, x: 0, y: 14)
+                    .shadow(color: .black.opacity(0.30), radius: 10, x: 0, y: 4)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
@@ -555,19 +562,21 @@ struct HotkeyRecorderView: View {
 // MARK: - App Card View
 struct AppCardView: View {
     let app: AppInfo
-    let isFront: Bool
+    /// 是否显示流光边框（环心卡片）。倒影复用同一视图，传 false。
+    let showBorder: Bool
 
     var body: some View {
-        VStack(spacing: 10) {
+        let isFront = showBorder
+        VStack(spacing: 8) {
             if let icon = app.icon {
                 Image(nsImage: icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 72, height: 72)
-                    .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 5)
+                    .frame(width: 48, height: 48)
+                    .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 4)
             } else {
                 Image(systemName: "app.fill")
-                    .font(.system(size: 56))
+                    .font(.system(size: 36))
                     .foregroundColor(.secondary)
             }
             // 名称底板：图标背景再花也不会糊字
@@ -582,9 +591,9 @@ struct AppCardView: View {
                         .fill(.black.opacity(isFront ? 0.5 : 0.35))
                 )
         }
-        .padding(.vertical, 14)
-        .padding(.horizontal, 12)
-        .frame(width: 120, height: 120)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .frame(width: 80, height: 88)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .background(
             Group {
@@ -623,28 +632,59 @@ struct IndexedCard: View {
     let app: AppInfo
     let currentIndex: Int
     let count: Int
-    let width: CGFloat
 
-    var body: some View {
-        let off = normalizedOffset
-        return AppCardView(app: app, isFront: index == currentIndex)
-            .frame(width: width)
-            .offset(x: CGFloat(off) * width * 0.5, y: off == 0 ? 0 : 14)
-            .scaleEffect(off == 0 ? 1.0 : 0.8)
-            .rotation3DEffect(
-                .degrees(Double(off) * -9),
-                axis: (x: 0, y: 1, z: 0),
-                perspective: 0.55
-            )
-            .opacity(off == 0 ? 1.0 : abs(off) == 1 ? 0.75 : 0.0)
-            .zIndex(index == currentIndex ? 10.0 : 5.0 - Double(abs(off)))
-            .animation(.spring(response: 0.32, dampingFraction: 0.85), value: currentIndex)
-    }
-
+    /// 归一化环偏移：-1..1 为可见邻位，0 为环心
     private var normalizedOffset: Int {
         var o = (index - currentIndex + count) % count
         if o > count / 2 { o -= count }
         return o
+    }
+
+    /// 环间距角：应用少时卡片大、角度大（Compiz Ring 感），应用多时收紧
+    private var ringPitch: Double {
+        switch count {
+        case 1: return 0
+        case 2: return 55
+        case 3: return 42
+        case 4: return 36
+        default: return 30
+        }
+    }
+
+    /// 相邻卡片中心距（与 80pt 卡片宽对应，环上略有重叠）
+    private let slotWidth: CGFloat = 104
+
+    var body: some View {
+        let off = normalizedOffset
+        let angle = Double(off) * ringPitch
+        let visible = abs(off) <= 1
+        return cardStack(front: off == 0)
+            .rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
+            .offset(x: CGFloat(off) * slotWidth, y: CGFloat(abs(off)) * 10)
+            .opacity(visible ? 1.0 : 0.0)
+            .zIndex(off == 0 ? 10.0 : 5.0 - Double(abs(off)))
+            .animation(.spring(response: 0.32, dampingFraction: 0.85), value: currentIndex)
+    }
+
+    /// 卡片 + 下方地面倒影（随卡片一起旋转，模拟 Compiz Ring 的地板反射）
+    private func cardStack(front: Bool) -> some View {
+        VStack(spacing: 6) {
+            AppCardView(app: app, showBorder: front)
+            // 倒影：垂直翻转 + 渐变淡出 + 轻模糊，压暗
+            AppCardView(app: app, showBorder: false)
+                .scaleEffect(y: -1)
+                .frame(height: 44, alignment: .top)
+                .clipped()
+                .mask(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.5), .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .blur(radius: 1.5)
+                .opacity(0.35)
+                .allowsHitTesting(false)
+        }
     }
 }
 
@@ -689,7 +729,7 @@ struct SwitcherView: View {
                             .padding(.top, 8)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 170)
+                    .frame(height: 150)
                 } else {
                     GeometryReader { geo in
                         ZStack {
@@ -698,14 +738,13 @@ struct SwitcherView: View {
                                     index: i,
                                     app: currentApps[i],
                                     currentIndex: state.index,
-                                    count: currentApps.count,
-                                    width: geo.size.width
+                                    count: currentApps.count
                                 )
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(height: 170)
+                    .frame(height: 150)
 
                     // 底部：进度点
                     DotsIndicator(count: currentApps.count, currentIndex: state.index)
@@ -714,7 +753,7 @@ struct SwitcherView: View {
             }
             .padding(.horizontal, 32)
             .padding(.top, 20)
-            .frame(width: 480, height: 300)
+            .frame(width: 420, height: 270)
         }
         // 呼出入场 / 收起退场动画（由模型 visible 驱动，每次呼出都会重播）
         .scaleEffect(state.visible ? 1.0 : 0.94)
@@ -773,7 +812,7 @@ func showSwitcher() {
     
     if switchPanel == nil {
         let panel = SwitchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 270),
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered, defer: false
         )
@@ -793,7 +832,7 @@ func showSwitcher() {
     // Always reposition when showing (settings may have changed)
     let screen = getTargetScreen()
     let sf = screen.visibleFrame
-    switchPanel?.setFrameOrigin(NSPoint(x: sf.midX - 240, y: sf.midY - 150))
+    switchPanel?.setFrameOrigin(NSPoint(x: sf.midX - 210, y: sf.midY - 135))
     
     switchPanel?.orderFront(nil)
 }
