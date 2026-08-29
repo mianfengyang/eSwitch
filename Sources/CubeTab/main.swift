@@ -252,38 +252,18 @@ struct GlassDimOverlay: View {
     }
 }
 
-// MARK: - Flow Border
-/// 顺时针流光边框：一段亮弧沿圆角矩形边框匀速旋转
-struct FlowBorder: View {
+// MARK: - Highlight Border
+/// 中间卡片边框：静态白色高亮描边
+struct HighlightBorder: View {
     var lineWidth: CGFloat = 2
-    @State private var angle: Double = 0
-    private let arcFraction: Double = 0.16
 
     var body: some View {
         GeometryReader { geo in
             let rect = CGRect(origin: .zero, size: geo.size).insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
-            let full = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).path(in: rect)
-            ZStack {
-                full
-                    .trim(from: 0, to: arcFraction)
-                    .stroke(
-                        LinearGradient(
-                            colors: [Color.white.opacity(0.75), .white.opacity(0.12)],
-                            startPoint: .leading, endPoint: .trailing
-                        ),
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(angle))
-                    .mask(full.stroke(style: StrokeStyle(lineWidth: lineWidth)))
-                full
-                    .stroke(Color.white.opacity(0.18), lineWidth: lineWidth)
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .onAppear {
-                withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
-                    angle = 360
-                }
-            }
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .path(in: rect)
+                .stroke(Color.white.opacity(0.75), lineWidth: lineWidth)
+                .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 }
@@ -592,7 +572,6 @@ struct AppCardView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 48, height: 48)
-                    .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 4)
             } else {
                 Image(systemName: "app.fill")
                     .font(.system(size: 36))
@@ -634,15 +613,19 @@ struct AppCardView: View {
         .overlay(
             Group {
                 if isFront {
-                    FlowBorder(lineWidth: 2)
+                    HighlightBorder(lineWidth: 2)
                 } else {
                     RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                         .stroke(Color.white.opacity(0.20), lineWidth: 1)
                 }
             }
         )
-        .shadow(color: isFront ? Theme.accent.opacity(0.35) : .clear, radius: 14, x: 0, y: 0)
-        .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 8)
+        // shadow 只给正面卡片：倒影若再带 shadow，切换时 6 份高斯投影逐帧重算，
+        // 是 GPU 峰值主因之一。倒影靠自身 alpha 淡出即可，视觉无损。
+        // 半径从 14/10 降到 8/6：高斯模糊成本随半径平方增长，动画期间每帧重算，
+        // 这是切换时 GPU 尖峰的主要来源。
+        .shadow(color: isFront ? Theme.accent.opacity(0.4) : .clear, radius: 8, x: 0, y: 0)
+        .shadow(color: isFront ? Color.black.opacity(0.4) : .clear, radius: 6, x: 0, y: 6)
     }
 }
 
