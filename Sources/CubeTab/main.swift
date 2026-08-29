@@ -131,6 +131,7 @@ enum Theme {
 final class GlassBackground: NSView {
     let material: NSVisualEffectView.Material
     let blendingMode: NSVisualEffectView.BlendingMode
+    private let effect = NSVisualEffectView()
 
     init(material: NSVisualEffectView.Material = .hudWindow,
          blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
@@ -139,13 +140,17 @@ final class GlassBackground: NSView {
         self.blendingMode = blendingMode
         super.init(frame: .zero)
         wantsLayer = true
+        layer?.backgroundColor = .clear
 
-        let effect = NSVisualEffectView()
         effect.material = material
         effect.blendingMode = blendingMode
         effect.state = state
         effect.isEmphasized = true
-        if #available(macOS 13.0, *) { effect.maskImage = nil }
+        effect.wantsLayer = true
+        effect.layer?.backgroundColor = .clear
+        // 关键：behindWindow 模糊由系统合成器在窗口层绘制，view 自己的
+        // cornerRadius / masksToBounds 截不到它，四角会露出直角灰底。
+        // 唯一可靠做法是给 effect 设 maskImage（随尺寸动态重建）。
         effect.translatesAutoresizingMaskIntoConstraints = false
         addSubview(effect)
         NSLayoutConstraint.activate([
@@ -154,6 +159,7 @@ final class GlassBackground: NSView {
             effect.topAnchor.constraint(equalTo: topAnchor),
             effect.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+        updateMask()
     }
 
     required init?(coder: NSCoder) {
@@ -162,11 +168,24 @@ final class GlassBackground: NSView {
 
     override func layout() {
         super.layout()
-        layer?.cornerRadius = Theme.panelRadius
         layer?.masksToBounds = true
-        subviews.first?.wantsLayer = true
-        subviews.first?.layer?.cornerRadius = Theme.panelRadius
-        subviews.first?.layer?.masksToBounds = true
+        updateMask()
+    }
+
+    /// 重建圆角蒙版，让 behindWindow 模糊严格限定在圆角内，四角完全透明。
+    private func updateMask() {
+        let b = bounds
+        guard b.width > 1, b.height > 1 else {
+            effect.maskImage = nil
+            return
+        }
+        let radius = Theme.panelRadius
+        let img = NSImage(size: b.size, flipped: false) { rect in
+            NSColor.white.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        effect.maskImage = img
     }
 }
 
@@ -795,6 +814,17 @@ class SwitchPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// 透明背景托管视图：NSHostingView 默认按窗口背景色（系统灰）填充整个矩形 frame，
+/// 圆角(24pt)之外四角会透出灰底。重写 isOpaque 并设 layer 背景为透明，让圆角外完全透出。
+final class TransparentHostingView<Content: View>: NSHostingView<Content> {
+    override var isOpaque: Bool { false }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        wantsLayer = true
+        layer?.backgroundColor = .clear
+    }
+}
+
 // MARK: - Show / Hide
 func showSwitcher() {
     log("showSwitcher")
@@ -829,7 +859,7 @@ func showSwitcher() {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
-        panel.contentView = NSHostingView(rootView: SwitcherView(state: cubeState))
+        panel.contentView = TransparentHostingView(rootView: SwitcherView(state: cubeState))
         switchPanel = panel
     }
 
@@ -990,9 +1020,50 @@ func showSettings() {
 // MARK: - Status Bar
 var statusItem: NSStatusItem?
 
+/// 托盘图标：代码绘制的「三卡片扇形」模板图标，自动适配深浅菜单栏。
+/// lockFocus 按屏幕 backing scale 渲染（Retina 自动 2x），矢量绘制 18pt 下锐利不糊。
+func statusBarIconImage() -> NSImage {
+    let s: CGFloat = 18
+    let img = NSImage(size: NSSize(width: s, height: s))
+    img.lockFocus()
+    guard let ctx = NSGraphicsContext.current?.cgContext else {
+        img.unlockFocus(); return img
+    }
+    NSColor.white.setFill()
+    NSColor.white.setStroke()
+
+    /// 画一张圆角卡片：center 中心点，angle 旋转角，filled 实心/描边
+    func card(center: NSPoint, angle: CGFloat, w: CGFloat, h: CGFloat, filled: Bool) {
+        ctx.saveGState()
+        ctx.translateBy(x: center.x, y: center.y)
+        ctx.rotate(by: angle * .pi / 180)
+        let path = NSBezierPath(
+            roundedRect: NSRect(x: -w / 2, y: -h / 2, width: w, height: h),
+            xRadius: 1.7, yRadius: 1.7
+        )
+        if filled {
+            path.fill()
+        } else {
+            path.lineWidth = 1.3
+            path.stroke()
+        }
+        ctx.restoreGState()
+    }
+
+    // 后层两张描边卡片（先画，被前层部分遮挡）
+    card(center: NSPoint(x: 5.6, y: 10.6), angle: -20, w: 8.5, h: 11.5, filled: false)
+    card(center: NSPoint(x: 12.4, y: 10.6), angle: 20, w: 8.5, h: 11.5, filled: false)
+    // 前层实心卡片（居中偏下，压住两张后卡的交叠处）
+    card(center: NSPoint(x: 9, y: 8.2), angle: 0, w: 8.5, h: 11.5, filled: true)
+
+    img.unlockFocus()
+    img.isTemplate = true  // 单色模板：深色菜单栏显示白色，浅色菜单栏显示黑色
+    return img
+}
+
 func setupStatusBar() {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    statusItem?.button?.image = NSImage(systemSymbolName: "cube.fill", accessibilityDescription: "CubeTab")
+    statusItem?.button?.image = statusBarIconImage()
     
     let menu = NSMenu()
     

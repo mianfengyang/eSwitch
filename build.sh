@@ -50,6 +50,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'EOF'
 	<string>1</string>
 	<key>CFBundleExecutable</key>
 	<string>CubeTab</string>
+	<key>CFBundleIconFile</key>
+	<string>CubeTab</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>LSUIElement</key>
@@ -65,6 +67,13 @@ EOF
 echo ""
 echo "=== Build Complete ==="
 echo "App bundle: $APP_BUNDLE"
+echo ""
+
+# Step 4: Refresh Finder icon cache (mtime bump)
+echo "[4/4] Refreshing icon cache..."
+touch "$APP_BUNDLE"
+/System/bin/killall -KILL Dock 2>/dev/null || true
+echo "Icon cache refreshed."
 echo ""
 echo "To run: open \"$APP_BUNDLE\""
 echo "To install: sudo cp -R \"$APP_BUNDLE\" /Applications/"
