@@ -117,6 +117,151 @@ struct Hotkey: Codable, Equatable {
     }
 }
 
+// MARK: - Theme
+/// 中性灰玻璃主题。卡片描边/选中光环使用系统强调色（跟随用户系统主题）。
+enum Theme {
+    static let accent = Color.accentColor
+    static let panelRadius: CGFloat = 24
+    static let cardRadius: CGFloat = 16
+    static let dimText = Color.white.opacity(0.55)
+    static let dimmerText = Color.white.opacity(0.4)
+}
+
+// MARK: - Glass Background (NSVisualEffectView)
+final class GlassBackground: NSView {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+
+    init(material: NSVisualEffectView.Material = .hudWindow,
+         blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
+         state: NSVisualEffectView.State = .active) {
+        self.material = material
+        self.blendingMode = blendingMode
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        let effect = NSVisualEffectView()
+        effect.material = material
+        effect.blendingMode = blendingMode
+        effect.state = state
+        effect.isEmphasized = true
+        if #available(macOS 13.0, *) { effect.maskImage = nil }
+        effect.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(effect)
+        NSLayoutConstraint.activate([
+            effect.leadingAnchor.constraint(equalTo: leadingAnchor),
+            effect.trailingAnchor.constraint(equalTo: trailingAnchor),
+            effect.topAnchor.constraint(equalTo: topAnchor),
+            effect.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = Theme.panelRadius
+        layer?.masksToBounds = true
+        subviews.first?.wantsLayer = true
+        subviews.first?.layer?.cornerRadius = Theme.panelRadius
+        subviews.first?.layer?.masksToBounds = true
+    }
+}
+
+/// 圆角玻璃容器：模糊层 + 半透明描边 + 顶部高光
+struct GlassContainer<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .background(
+                ZStack {
+                    GlassBackgroundView()
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous))
+                    GlassDimOverlay()
+                }
+                .shadow(color: .black.opacity(0.55), radius: 28, x: 0, y: 14)
+                .shadow(color: .black.opacity(0.30), radius: 10, x: 0, y: 4)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
+                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.28), .white.opacity(0.02), .clear],
+                            startPoint: .top, endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            )
+    }
+}
+
+/// SwiftUI 用的毛玻璃背景包装
+struct GlassBackgroundView: NSViewRepresentable {
+    func makeNSView(context: Context) -> GlassBackground { GlassBackground() }
+    func updateNSView(_ nsView: GlassBackground, context: Context) {}
+}
+
+/// 玻璃面板的深色叠层：hudWindow 材质偏浅，压一层半透明黑把底色压深、白字/白描边立刻跳出来
+struct GlassDimOverlay: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
+            .fill(Color.black.opacity(0.42))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.12), .clear, .black.opacity(0.22)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous))
+    }
+}
+
+// MARK: - Flow Border
+/// 顺时针流光边框：一段亮弧沿圆角矩形边框匀速旋转
+struct FlowBorder: View {
+    var lineWidth: CGFloat = 2
+    @State private var angle: Double = 0
+    private let arcFraction: Double = 0.16
+
+    var body: some View {
+        GeometryReader { geo in
+            let rect = CGRect(origin: .zero, size: geo.size).insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
+            let full = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).path(in: rect)
+            ZStack {
+                full
+                    .trim(from: 0, to: arcFraction)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.75), .white.opacity(0.12)],
+                            startPoint: .leading, endPoint: .trailing
+                        ),
+                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(angle))
+                    .mask(full.stroke(style: StrokeStyle(lineWidth: lineWidth)))
+                full
+                    .stroke(Color.white.opacity(0.18), lineWidth: lineWidth)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .onAppear {
+                withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
+                    angle = 360
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Settings Manager
 class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
@@ -218,6 +363,7 @@ let cubeState = CubeStateModel()
 
 class CubeStateModel: ObservableObject {
     @Published var index: Int = 0
+    @Published var visible: Bool = false
 }
 
 // MARK: - Settings View
@@ -410,7 +556,7 @@ struct HotkeyRecorderView: View {
 struct AppCardView: View {
     let app: AppInfo
     let isFront: Bool
-    
+
     var body: some View {
         VStack(spacing: 10) {
             if let icon = app.icon {
@@ -418,45 +564,57 @@ struct AppCardView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 72, height: 72)
+                    .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 5)
             } else {
                 Image(systemName: "app.fill")
                     .font(.system(size: 56))
                     .foregroundColor(.secondary)
             }
+            // 名称底板：图标背景再花也不会糊字
             Text(app.name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.primary)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(isFront ? .white : Color.white.opacity(0.85))
                 .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(.black.opacity(isFront ? 0.5 : 0.35))
+                )
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, 14)
         .padding(.horizontal, 12)
         .frame(width: 120, height: 120)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .background(
             Group {
                 if isFront {
-                    RoundedRectangle(cornerRadius: 18)
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                         .fill(
                             LinearGradient(
-                                colors: [.white.opacity(0.22), .white.opacity(0.08), .white.opacity(0.14)],
+                                colors: [.white.opacity(0.20), .white.opacity(0.06), .white.opacity(0.12)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
                         )
                 } else {
-                    RoundedRectangle(cornerRadius: 18)
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                         .fill(Color.white.opacity(0.12))
                 }
             }
         )
-        .overlay {
-            if isFront {
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(Color.white, lineWidth: 3)
+        .overlay(
+            Group {
+                if isFront {
+                    FlowBorder(lineWidth: 2)
+                } else {
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                        .stroke(Color.white.opacity(0.20), lineWidth: 1)
+                }
             }
-        }
-        .shadow(color: isFront ? .white.opacity(0.4) : .clear, radius: 8, x: 0, y: 0)
-        .shadow(color: isFront ? .black.opacity(0.25) : .clear, radius: 6, x: 0, y: 3)
+        )
+        .shadow(color: isFront ? Theme.accent.opacity(0.35) : .clear, radius: 14, x: 0, y: 0)
+        .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 8)
     }
 }
 
@@ -466,18 +624,23 @@ struct IndexedCard: View {
     let currentIndex: Int
     let count: Int
     let width: CGFloat
-    
+
     var body: some View {
         let off = normalizedOffset
         return AppCardView(app: app, isFront: index == currentIndex)
             .frame(width: width)
-            .offset(x: CGFloat(off) * width * 0.45)
-            .scaleEffect(off == 0 ? 1.0 : 0.78)
+            .offset(x: CGFloat(off) * width * 0.5, y: off == 0 ? 0 : 14)
+            .scaleEffect(off == 0 ? 1.0 : 0.8)
+            .rotation3DEffect(
+                .degrees(Double(off) * -9),
+                axis: (x: 0, y: 1, z: 0),
+                perspective: 0.55
+            )
             .opacity(off == 0 ? 1.0 : abs(off) == 1 ? 0.75 : 0.0)
             .zIndex(index == currentIndex ? 10.0 : 5.0 - Double(abs(off)))
-            .animation(.easeInOut(duration: 0.25), value: currentIndex)
+            .animation(.spring(response: 0.32, dampingFraction: 0.85), value: currentIndex)
     }
-    
+
     private var normalizedOffset: Int {
         var o = (index - currentIndex + count) % count
         if o > count / 2 { o -= count }
@@ -485,34 +648,83 @@ struct IndexedCard: View {
     }
 }
 
-struct SwitcherView: View {
-    @ObservedObject var state: CubeStateModel
-    
+/// 底部进度指示点
+struct DotsIndicator: View {
+    let count: Int
+    let currentIndex: Int
+
     var body: some View {
-        ZStack {
-            if currentApps.isEmpty {
-                VStack {
-                    Image(systemName: "app.fill").font(.system(size: 40)).foregroundColor(.secondary)
-                    Text("没有可切换的应用").foregroundColor(.secondary).padding(.top, 8)
-                }
-                .frame(width: 480, height: 300)            } else {
-                GeometryReader { geo in
-                    ZStack {
-                        ForEach(currentApps.indices, id: \.self) { i in
-                            IndexedCard(
-                                index: i,
-                                app: currentApps[i],
-                                currentIndex: state.index,
-                                count: currentApps.count,
-                                width: geo.size.width
-                            )
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .frame(width: 480, height: 300)
+        HStack(spacing: 6) {
+            ForEach(0..<count, id: \.self) { i in
+                Capsule()
+                    .fill(i == currentIndex ? Theme.accent : Color.white.opacity(0.38))
+                    .frame(width: i == currentIndex ? 14 : 5, height: 5)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.9), value: currentIndex)
             }
         }
+    }
+}
+
+struct SwitcherView: View {
+    @ObservedObject var state: CubeStateModel
+
+    var body: some View {
+        GlassContainer {
+            VStack(spacing: 14) {
+                // 顶部：当前应用名
+                Text(currentAppName)
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .frame(height: 22)
+
+                // 中间：卡片轮播
+                if currentApps.isEmpty {
+                    VStack {
+                        Image(systemName: "app.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(Theme.dimmerText)
+                        Text("没有可切换的应用")
+                            .foregroundColor(Theme.dimmerText)
+                            .padding(.top, 8)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 170)
+                } else {
+                    GeometryReader { geo in
+                        ZStack {
+                            ForEach(currentApps.indices, id: \.self) { i in
+                                IndexedCard(
+                                    index: i,
+                                    app: currentApps[i],
+                                    currentIndex: state.index,
+                                    count: currentApps.count,
+                                    width: geo.size.width
+                                )
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .frame(height: 170)
+
+                    // 底部：进度点
+                    DotsIndicator(count: currentApps.count, currentIndex: state.index)
+                        .padding(.bottom, 2)
+                }
+            }
+            .padding(.horizontal, 32)
+            .padding(.top, 20)
+            .frame(width: 480, height: 300)
+        }
+        // 呼出入场 / 收起退场动画（由模型 visible 驱动，每次呼出都会重播）
+        .scaleEffect(state.visible ? 1.0 : 0.94)
+        .opacity(state.visible ? 1.0 : 0.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.9), value: state.visible)
+    }
+
+    private var currentAppName: String {
+        guard !currentApps.isEmpty, state.index < currentApps.count else { return " " }
+        return currentApps[state.index].name
     }
 }
 
@@ -557,6 +769,7 @@ func showSwitcher() {
     cubeState.index = startIndex
     currentIndex = startIndex
     isVisible = true
+    cubeState.visible = true
     
     if switchPanel == nil {
         let panel = SwitchPanel(
@@ -565,9 +778,10 @@ func showSwitcher() {
             backing: .buffered, defer: false
         )
         panel.level = .floating
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false  // 阴影由 SwiftUI 内容自身绘制，跟随圆角
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.titleVisibility = .hidden
@@ -587,6 +801,7 @@ func showSwitcher() {
 func hideSwitcher(activate: Bool = true) {
     log("hideSwitcher(activate: \(activate))")
     isVisible = false
+    cubeState.visible = false
     switchPanel?.orderOut(nil)
     
     if activate, !currentApps.isEmpty && currentIndex < currentApps.count {
