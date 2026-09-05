@@ -3,17 +3,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "CubeTab",
+    name: "eSwitch",
     platforms: [
         .macOS(.v12)
     ],
     products: [
-        .executable(name: "CubeTab", targets: ["CubeTab"])
+        .executable(name: "eSwitch", targets: ["eSwitch"])
     ],
     targets: [
         .executableTarget(
-            name: "CubeTab",
-            exclude: ["Resources/Info.plist", "Resources/Assets.xcassets", "CubeTab.entitlements", "Resources/CubeTab.icns"],
+            name: "eSwitch",
+            exclude: ["Resources/Info.plist", "Resources/Assets.xcassets", "eSwitch.entitlements", "Resources/eSwitch.icns"],
 
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -24,9 +24,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "CubeTabTests",
-            dependencies: ["CubeTab"],
-            path: "Tests/CubeTabTests"
+            name: "eSwitchTests",
+            dependencies: ["eSwitch"],
+            path: "Tests/eSwitchTests"
         )
     ],
     swiftLanguageVersions: [.v5]

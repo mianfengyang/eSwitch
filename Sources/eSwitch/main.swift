@@ -6,7 +6,7 @@ import ServiceManagement
 func log(_ msg: String) {
     let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
     let line = "[\(ts)] \(msg)\n"
-    let path = "/tmp/cubetab_debug.log"
+    let path = "/tmp/eswitch_debug.log"
     if let data = line.data(using: .utf8) {
         if let fh = FileHandle(forWritingAtPath: path) {
             fh.seekToEndOfFile(); fh.write(data); fh.closeFile()
@@ -380,7 +380,7 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("CubeTab 设置")
+                Text("eSwitch 设置")
                     .font(.headline)
                 Spacer()
                 Button("关闭") { dismiss() }
@@ -985,7 +985,7 @@ func showSettings() {
         backing: .buffered,
         defer: false
     )
-    window.title = "CubeTab 设置"
+    window.title = "eSwitch 设置"
     window.contentView = NSHostingView(rootView: SettingsView())
     window.isReleasedWhenClosed = false
     
@@ -1003,41 +1003,44 @@ func showSettings() {
 // MARK: - Status Bar
 var statusItem: NSStatusItem?
 
-/// 托盘图标：代码绘制的「三卡片扇形」模板图标，自动适配深浅菜单栏。
+/// 托盘图标：代码绘制的「中间卡片 + 双向箭头」模板图标，与新 App 图标同构，自动适配深浅菜单栏。
 /// lockFocus 按屏幕 backing scale 渲染（Retina 自动 2x），矢量绘制 18pt 下锐利不糊。
 func statusBarIconImage() -> NSImage {
     let s: CGFloat = 18
     let img = NSImage(size: NSSize(width: s, height: s))
     img.lockFocus()
-    guard let ctx = NSGraphicsContext.current?.cgContext else {
-        img.unlockFocus(); return img
-    }
     NSColor.white.setFill()
-    NSColor.white.setStroke()
 
-    /// 画一张圆角卡片：center 中心点，angle 旋转角，filled 实心/描边
-    func card(center: NSPoint, angle: CGFloat, w: CGFloat, h: CGFloat, filled: Bool) {
-        ctx.saveGState()
-        ctx.translateBy(x: center.x, y: center.y)
-        ctx.rotate(by: angle * .pi / 180)
-        let path = NSBezierPath(
-            roundedRect: NSRect(x: -w / 2, y: -h / 2, width: w, height: h),
-            xRadius: 1.7, yRadius: 1.7
-        )
-        if filled {
-            path.fill()
-        } else {
-            path.lineWidth = 1.3
-            path.stroke()
-        }
-        ctx.restoreGState()
-    }
+    // 中间圆角卡片（实心）
+    let card = NSBezierPath(
+        roundedRect: NSRect(x: 5.0, y: 5.0, width: 8.0, height: 8.0),
+        xRadius: 2.0, yRadius: 2.0
+    )
+    card.fill()
 
-    // 后层两张描边卡片（先画，被前层部分遮挡）
-    card(center: NSPoint(x: 5.6, y: 10.6), angle: -20, w: 8.5, h: 11.5, filled: false)
-    card(center: NSPoint(x: 12.4, y: 10.6), angle: 20, w: 8.5, h: 11.5, filled: false)
-    // 前层实心卡片（居中偏下，压住两张后卡的交叠处）
-    card(center: NSPoint(x: 9, y: 8.2), angle: 0, w: 8.5, h: 11.5, filled: true)
+    // 左侧左向箭头（杆在卡片背后，只露出头部）
+    let leftArrow = NSBezierPath()
+    leftArrow.move(to: NSPoint(x: 0.8, y: 9.0))          // 箭尖
+    leftArrow.line(to: NSPoint(x: 3.6, y: 11.0))
+    leftArrow.line(to: NSPoint(x: 3.6, y: 10.0))
+    leftArrow.line(to: NSPoint(x: 5.0, y: 10.0))
+    leftArrow.line(to: NSPoint(x: 5.0, y: 8.0))
+    leftArrow.line(to: NSPoint(x: 3.6, y: 8.0))
+    leftArrow.line(to: NSPoint(x: 3.6, y: 7.0))
+    leftArrow.close()
+    leftArrow.fill()
+
+    // 右侧右向箭头（镜像）
+    let rightArrow = NSBezierPath()
+    rightArrow.move(to: NSPoint(x: 17.2, y: 9.0))        // 箭尖
+    rightArrow.line(to: NSPoint(x: 14.4, y: 11.0))
+    rightArrow.line(to: NSPoint(x: 14.4, y: 10.0))
+    rightArrow.line(to: NSPoint(x: 13.0, y: 10.0))
+    rightArrow.line(to: NSPoint(x: 13.0, y: 8.0))
+    rightArrow.line(to: NSPoint(x: 14.4, y: 8.0))
+    rightArrow.line(to: NSPoint(x: 14.4, y: 7.0))
+    rightArrow.close()
+    rightArrow.fill()
 
     img.unlockFocus()
     img.isTemplate = true  // 单色模板：深色菜单栏显示白色，浅色菜单栏显示黑色
@@ -1050,7 +1053,7 @@ func setupStatusBar() {
     
     let menu = NSMenu()
     
-    let titleItem = NSMenuItem(title: "CubeTab v1.0", action: nil, keyEquivalent: "")
+    let titleItem = NSMenuItem(title: "eSwitch v1.0", action: nil, keyEquivalent: "")
     titleItem.isEnabled = false
     menu.addItem(titleItem)
     menu.addItem(NSMenuItem.separator())
@@ -1099,7 +1102,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             alert.alertStyle = .informational
         } else {
             alert.messageText = "需要辅助功能权限"
-            alert.informativeText = "请在系统设置中启用 CubeTab 的辅助功能权限。"
+            alert.informativeText = "请在系统设置中启用 eSwitch 的辅助功能权限。"
             alert.alertStyle = .warning
             alert.addButton(withTitle: "打开系统设置")
             if alert.runModal() == .alertFirstButtonReturn {

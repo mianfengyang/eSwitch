@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import Testing
 import Foundation
-@testable import CubeTab
+@testable import eSwitch
 
 @Suite("Hotkey 快捷键")
 struct HotkeyTests {

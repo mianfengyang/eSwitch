@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-APP_NAME="CubeTab"
+APP_NAME="eSwitch"
 BUILD_DIR=".build/arm64-apple-macosx/release"
 APP_BUNDLE="build/${APP_NAME}.app"
 
-echo "=== CubeTab Build Script ==="
+echo "=== eSwitch Build Script ==="
 echo ""
 
 # Step 1: Build with Swift Package Manager
@@ -23,13 +23,13 @@ cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 # Copy the icon
-if [ -f "Sources/CubeTab/Resources/CubeTab.icns" ]; then
-    cp "Sources/CubeTab/Resources/CubeTab.icns" "$APP_BUNDLE/Contents/Resources/"
+if [ -f "Sources/eSwitch/Resources/eSwitch.icns" ]; then
+    cp "Sources/eSwitch/Resources/eSwitch.icns" "$APP_BUNDLE/Contents/Resources/"
 fi
 
 # Copy Assets.xcassets (for Xcode compatibility, optional)
-if [ -d "Sources/CubeTab/Resources/Assets.xcassets" ]; then
-    cp -r "Sources/CubeTab/Resources/Assets.xcassets" "$APP_BUNDLE/Contents/Resources/"
+if [ -d "Sources/eSwitch/Resources/Assets.xcassets" ]; then
+    cp -r "Sources/eSwitch/Resources/Assets.xcassets" "$APP_BUNDLE/Contents/Resources/"
 fi
 
 # Step 3: Create Info.plist
@@ -39,25 +39,25 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'EOF'
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>CubeTab</string>
+	<string>eSwitch</string>
 	<key>CFBundleDisplayName</key>
-	<string>CubeTab</string>
+	<string>eSwitch</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.cubetab</string>
+	<string>com.eswitch.app</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.3</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleExecutable</key>
-	<string>CubeTab</string>
+	<string>eSwitch</string>
 	<key>CFBundleIconFile</key>
-	<string>CubeTab</string>
+	<string>eSwitch</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>© 2026 CubeTab</string>
+	<string>© 2026 eSwitch</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>
