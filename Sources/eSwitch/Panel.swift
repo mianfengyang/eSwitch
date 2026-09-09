@@ -1,0 +1,120 @@
+import AppKit
+import SwiftUI
+
+// MARK: - Panel Screen Helper
+func getTargetScreen() -> NSScreen {
+    switch SettingsManager.shared.panelScreenMode {
+    case .mainScreen:
+        // NSScreen.main tracks the cursor, so use screens.first for a stable primary display
+        return NSScreen.screens.first ?? NSScreen.main ?? NSScreen.screens[0]
+    case .followCursor:
+        let location = NSEvent.mouseLocation
+        for screen in NSScreen.screens {
+            if NSMouseInRect(location, screen.frame, false) {
+                return screen
+            }
+        }
+        // Fallback to main if cursor not found on any screen
+        return NSScreen.main ?? NSScreen.screens[0]
+    }
+}
+
+// MARK: - Panel
+class SwitchPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+/// 透明背景托管视图：NSHostingView 默认按窗口背景色（系统灰）填充整个矩形 frame，
+/// 圆角(24pt)之外四角会透出灰底。重写 isOpaque 并设 layer 背景为透明，让圆角外完全透出。
+final class TransparentHostingView<Content: View>: NSHostingView<Content> {
+    override var isOpaque: Bool { false }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        wantsLayer = true
+        layer?.backgroundColor = .clear
+    }
+}
+
+// MARK: - Show / Hide
+func showSwitcher() {
+    log("showSwitcher")
+    currentApps = getApps()
+    guard !currentApps.isEmpty else { log("no apps"); return }
+    
+    // 尝试从上次选择的位置开始
+    var startIndex = 0
+    if let lastID = lastSelectedBundleID {
+        if let idx = currentApps.firstIndex(where: { $0.id == lastID }) {
+            startIndex = idx
+        }
+    }
+    
+    cubeState.index = startIndex
+    currentIndex = startIndex
+    isVisible = true
+    cubeState.visible = true
+    
+    if switchPanel == nil {
+        let panel = SwitchPanel(
+            contentRect: NSRect(x: 0, y: 0, width: Theme.panelWidth, height: Theme.panelHeight),
+            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered, defer: false
+        )
+        panel.level = .floating
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true  // 系统阴影贴合内容圆角轮廓生成（同系统 cmd-tab 切换器）
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.contentView = TransparentHostingView(rootView: SwitcherView(state: cubeState))
+        switchPanel = panel
+    }
+
+    // Always reposition when showing (settings may have changed)
+    let screen = getTargetScreen()
+    let sf = screen.visibleFrame
+    // 面板可能大于屏幕：等比缩放到屏幕 95% 内，内容同步 scaleEffect 避免裁剪
+    let s = min(1.0, sf.width * 0.95 / Theme.panelWidth, sf.height * 0.95 / Theme.panelHeight)
+    cubeState.scale = s
+    let sw = Theme.panelWidth * s
+    let sh = Theme.panelHeight * s
+    switchPanel?.setFrame(NSRect(x: sf.midX - sw / 2, y: sf.midY - sh / 2, width: sw, height: sh), display: true)
+    
+    // 窗口预览：每次呼出异步刷新一次（未授权/关闭时自动跳过，卡片保持 App 图标）
+    if SettingsManager.shared.windowPreview {
+        WindowPreviewProvider.shared.refresh(apps: currentApps)
+    }
+    
+    switchPanel?.orderFront(nil)
+}
+
+func hideSwitcher(activate: Bool = true) {
+    log("hideSwitcher(activate: \(activate))")
+    isVisible = false
+    cubeState.visible = false
+    switchPanel?.orderOut(nil)
+    
+    if activate, !currentApps.isEmpty && currentIndex < currentApps.count {
+        let target = currentApps[currentIndex]
+        lastSelectedBundleID = target.id
+        activateApp(target)
+    }
+}
+
+func rotateNext() {
+    guard !currentApps.isEmpty else { return }
+    currentIndex = (currentIndex + 1) % currentApps.count
+    cubeState.index = currentIndex
+    log("rotate -> \(currentIndex): \(currentApps[currentIndex].name)")
+}
+
+func rotatePrev() {
+    guard !currentApps.isEmpty else { return }
+    currentIndex = (currentIndex - 1 + currentApps.count) % currentApps.count
+    cubeState.index = currentIndex
+    log("rotate <- \(currentIndex): \(currentApps[currentIndex].name)")
+}
