@@ -130,10 +130,10 @@ enum Theme {
     // 面板固定尺寸
     static let panelWidth: CGFloat = 1260     // 420 × 3
     static let panelHeight: CGFloat = 810     // 270 × 3
-    static let cardWidth: CGFloat = 240       // 80 × 3
-    static let cardHeight: CGFloat = 264      // 88 × 3
-    static let slotWidth: CGFloat = 312       // 104 × 3
-    static let cardAreaHeight: CGFloat = 450  // 150 × 3
+    static let cardWidth: CGFloat = 272       // 240 → 272，卡片整体放大
+    static let cardHeight: CGFloat = 292      // 264 → 292，卡片整体放大
+    static let slotWidth: CGFloat = 330       // 312 → 330，配合更宽卡片
+    static let cardAreaHeight: CGFloat = 478  // 450 → 478，给更大的卡片留高度
 }
 
 // MARK: - Glass Background (NSVisualEffectView)
@@ -405,6 +405,117 @@ func getApps() -> [AppInfo] {
     }.compactMap { app in
         guard let name = app.localizedName else { return nil }
         return AppInfo(id: app.bundleIdentifier ?? UUID().uuidString, name: name, icon: app.icon, pid: app.processIdentifier)
+    }
+}
+
+// MARK: - Spaces (Virtual Desktops)
+/// CoreGraphics 私有 API：切换虚拟桌面 + 查询当前桌面。用于跨桌面激活应用。
+/// 符号不存在/调用失败时回退为普通 app.activate，行为不会比改动前差。
+typealias CGSSpaceID = UInt32
+
+private func cgsSymbol(_ name: String) -> UnsafeMutableRawPointer? {
+    dlsym(dlopen(nil, RTLD_NOW), name)
+}
+
+private func cgsMainConnectionID() -> Int32 {
+    typealias Fn = @convention(c) () -> Int32
+    if let s = cgsSymbol("CGSMainConnectionID") { return unsafeBitCast(s, to: Fn.self)() }
+    return 0
+}
+
+/// 当前活跃虚拟桌面的 id64（即 CGSSpaceID）
+private func cgsCurrentSpaceID() -> CGSSpaceID? {
+    typealias Fn = @convention(c) (Int32) -> UInt32
+    guard let s = cgsSymbol("CGSGetActiveSpace") else { return nil }
+    return unsafeBitCast(s, to: Fn.self)(cgsMainConnectionID())
+}
+
+private func cgsSwitchToSpace(_ spaceID: CGSSpaceID) -> Bool {
+    typealias Fn = @convention(c) (Int32, CGSSpaceID, Int32, Int32) -> Int32
+    guard let s = cgsSymbol("CGSSwitchToSpace") else { return false }
+    return unsafeBitCast(s, to: Fn.self)(cgsMainConnectionID(), spaceID, 1, 0) == 0
+}
+
+/// 枚举所有虚拟桌面 id64（跨全部显示器的并集，Mission Control 顶部栏顺序）。
+/// 数据源：~/Library/Preferences/com.apple.spaces.plist
+/// → SpacesDisplayConfiguration → Management Data → Monitors[].Spaces[].id64
+/// （macOS 26 实测：旧版 "Space Properties" 键已不存在，CGSGetSpaceID 符号也移除。）
+func allSpaceIDs() -> [CGSSpaceID] {
+    let url = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Preferences/com.apple.spaces.plist")
+    guard let dict = NSDictionary(contentsOf: url),
+          let cfg = dict["SpacesDisplayConfiguration"] as? [String: Any],
+          let mgmt = cfg["Management Data"] as? [String: Any],
+          let monitors = mgmt["Monitors"] as? [[String: Any]] else { return [] }
+    var ids: [CGSSpaceID] = []
+    for mon in monitors {
+        guard let spaces = mon["Spaces"] as? [[String: Any]] else { continue }
+        for s in spaces {
+            if let id = s["id64"] as? Int, !ids.contains(CGSSpaceID(id)) {
+                ids.append(CGSSpaceID(id))
+            }
+        }
+    }
+    return ids
+}
+
+/// 应用当前是否有窗口显示在屏幕上（即位于当前桌面）
+func appOnScreen(pid: pid_t) -> Bool {
+    guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return true }
+    return raw.contains { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) }
+}
+
+/// 扫描所有虚拟桌面，返回该应用有窗口的桌面 id64；找不到返回 nil。
+/// 没有任何公开 API 能直接查"窗口属于哪个桌面"，所以做实时探测：
+/// 逐个桌面切过去，检查该应用窗口是否 on-screen，命中即停。
+/// 只扫非当前桌面；当前桌面由调用方的 onScreen 检查覆盖。
+/// 找到目标时系统停在该桌面（调用方直接激活）；找不到则切回原桌面。
+func scanSpaceForApp(pid: pid_t) -> CGSSpaceID? {
+    let connID = cgsMainConnectionID()
+    guard connID != 0, cgsSymbol("CGSSwitchToSpace") != nil else { return nil }
+    let current = cgsCurrentSpaceID()
+    let candidates = allSpaceIDs().filter { $0 != current }
+    guard !candidates.isEmpty else { return nil }
+
+    var found: CGSSpaceID?
+    for id in candidates {
+        guard cgsSwitchToSpace(id) else { continue }
+        Thread.sleep(forTimeInterval: 0.5)  // 等待桌面切换动画结束
+        if appOnScreen(pid: pid) {
+            found = id
+            break
+        }
+    }
+    if found == nil, let c = current {
+        // 没找到：恢复原桌面
+        let restored = cgsSwitchToSpace(c)
+        log("space scan: target not found, restored to space \(c), result=\(restored)")
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+    return found
+}
+
+/// 跨虚拟桌面激活应用：当前桌面可见则直接激活；否则扫描所有桌面找到其窗口
+/// 所在桌面，停在该桌面后激活。覆盖"所有桌面空间中已打开且有活动窗口的应用"。
+/// 扫描涉及多次真实桌面切换（秒级），放到后台线程执行，不阻塞 UI。
+func activateApp(_ app: AppInfo) {
+    guard let running = NSRunningApplication(processIdentifier: app.pid) else { return }
+
+    // 当前桌面可见 → 直接激活
+    if appOnScreen(pid: app.pid) {
+        running.activate(options: [.activateIgnoringOtherApps])
+        return
+    }
+
+    DispatchQueue.global(qos: .userInitiated).async {
+        guard let target = scanSpaceForApp(pid: app.pid) else {
+            running.activate(options: [.activateIgnoringOtherApps])
+            return
+        }
+        log("activating \(app.name): found on space \(target)")
+        // 扫描结束时系统已停在该桌面，稍等动画收尾再激活
+        Thread.sleep(forTimeInterval: 0.4)
+        running.activate(options: [.activateIgnoringOtherApps])
     }
 }
 
@@ -715,44 +826,36 @@ struct AppCardView: View {
     /// 是否显示流光边框（环心卡片）。倒影复用同一视图，传 false。
     let showBorder: Bool
 
-    var body: some View {
-        let isFront = showBorder
-        VStack(spacing: 24) {
-            // 预览优先：有窗口截图就显示内容，没有（无权限/无窗口）降级为 App 图标
+    /// 卡片内容：窗口预览优先，无预览（无权限/无窗口）降级为 App 图标。
+    /// 应用名只显示在卡片上方（面板顶部标题），卡片内部不再重复。
+    private var content: some View {
+        Group {
             if let preview = preview {
                 Image(nsImage: preview)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: Theme.cardWidth - 48, height: Theme.cardHeight * 0.62)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius * 0.5, style: .continuous))
-                    .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                    .frame(width: Theme.cardWidth - 48, height: Theme.cardHeight - 48)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius * 0.4, style: .continuous))
             } else if let icon = app.icon {
                 Image(nsImage: icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 144, height: 144)
+                    .frame(width: Theme.cardWidth - 48, height: Theme.cardHeight - 48)
             } else {
                 Image(systemName: "app.fill")
-                    .font(.system(size: 108))
+                    .font(.system(size: 144))
                     .foregroundColor(.secondary)
             }
-            // 名称底板：图标背景再花也不会糊字
-            Text(app.name)
-                .font(.system(size: 36, weight: .medium, design: .rounded))
-                .foregroundColor(isFront ? .white : Color.white.opacity(0.85))
-                .lineLimit(1)
-                .padding(.horizontal, 30)
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity)
-                .background(
-                    Capsule()
-                        .fill(.black.opacity(isFront ? 0.5 : 0.35))
-                )
         }
-        .padding(.vertical, 30)
-        .padding(.horizontal, 24)
-        .frame(width: Theme.cardWidth, height: Theme.cardHeight)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    var body: some View {
+        let isFront = showBorder
+        return content
+            // 预览/图标与卡片边框保持 24pt 间距，最大化填满卡片
+            .padding(24)
+            .frame(width: Theme.cardWidth, height: Theme.cardHeight)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .background(
             Group {
                 if isFront {
@@ -1037,9 +1140,7 @@ func hideSwitcher(activate: Bool = true) {
     if activate, !currentApps.isEmpty && currentIndex < currentApps.count {
         let target = currentApps[currentIndex]
         lastSelectedBundleID = target.id
-        if let app = NSRunningApplication(processIdentifier: target.pid) {
-            app.activate(options: [.activateIgnoringOtherApps])
-        }
+        activateApp(target)
     }
 }
 
