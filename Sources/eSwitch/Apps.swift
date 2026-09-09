@@ -1,29 +1,27 @@
 import AppKit
-import ApplicationServices
+import CoreGraphics
 
 // MARK: - Apps
 
-/// 应用是否有至少一个可见窗口（AX 查询，辅助功能权限下可用；
-/// 无权限时保守返回 true，宁可多列不漏列）
+/// 应用是否有至少一个可见窗口。
+///
+/// 用 CGWindowListCopyWindowInfo(.optionAll) 判断而不是 AX：macOS 26 的
+/// AX kAXWindowsAttribute 不返回"所有窗口都在其他桌面空间"的应用的窗口，
+/// 会导致跨空间应用被列表漏掉。CGWindowList 能看到全部空间。
+/// 无权限时窗口层面仍可枚举（仅 name 为空），保守返回 true。
 func appHasWindows(pid: pid_t) -> Bool {
-    guard AXIsProcessTrusted() else { return true }
-    let appElement = AXUIElementCreateApplication(pid)
-    var windowsRef: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-          let windows = windowsRef as? [AXUIElement] else { return true }
-    for window in windows {
-        var mainRef: CFTypeRef?
-        var focusedRef: CFTypeRef?
-        // 只认真正可见的窗口：main 或 focused（排除后台隐藏窗口）
-        let isMain = AXUIElementCopyAttributeValue(window, kAXMainAttribute as CFString, &mainRef) == .success
-            && (mainRef as? Bool ?? false)
-        let isFocused = AXUIElementCopyAttributeValue(window, kAXFocusedAttribute as CFString, &focusedRef) == .success
-            && (focusedRef as? Bool ?? false)
-        if isMain || isFocused { return true }
+    guard let raw = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else { return true }
+    for info in raw {
+        guard ((info[kCGWindowOwnerPID as String] as? Int) ?? -1) == Int(pid) else { continue }
+        let layer = (info[kCGWindowLayer as String] as? Int) ?? 0
+        guard layer == 0 else { continue }
+        let bounds = info[kCGWindowBounds as String] as? [String: CGFloat] ?? [:]
+        let w = bounds["Width"] ?? 0
+        let h = bounds["Height"] ?? 0
+        // 过滤系统菜单栏/状态栏等细窄窗口（如 1920x30），只算真实窗口
+        if w > 100 && h > 100 { return true }
     }
-    // 窗口存在但没有 main/focused 标记的（如被其他全屏应用遮挡时的普通窗口），
-    // 仍算可用，避免误杀
-    return !windows.isEmpty
+    return false
 }
 
 func getApps() -> [AppInfo] {

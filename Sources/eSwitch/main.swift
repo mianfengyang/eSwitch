@@ -45,6 +45,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // MARK: - Main
+if CommandLine.arguments.contains("--selftest-ctrl") {
+    runCtrlSelfTest()
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 app.delegate = AppDelegate.shared
