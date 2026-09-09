@@ -30,20 +30,6 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
-
-                Toggle("卡片窗口预览", isOn: $settings.windowPreview)
-                    .toggleStyle(.switch)
-                    .padding(.vertical, 4)
-                if settings.windowPreview && !WindowPreviewProvider.shared.granted {
-                    Button("打开「隐私与安全性 → 屏幕录制」授权") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
-                    }
-                    .controlSize(.small)
-                    .font(.caption)
-                }
-                Text(windowPreviewHint)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
             .padding()
 
@@ -86,13 +72,6 @@ struct SettingsView: View {
             .padding(.vertical, 8)
         }
         .frame(width: 340, height: 395)
-    }
-
-    /// 窗口预览权限状态提示
-    private var windowPreviewHint: String {
-        if !settings.windowPreview { return "关闭时卡片显示 App 图标。" }
-        if WindowPreviewProvider.shared.granted { return "卡片显示各应用最前窗口的实时内容。" }
-        return "需要「屏幕录制」权限才能显示窗口内容，当前未授权（卡片暂用 App 图标）。"
     }
 }
 
@@ -211,29 +190,21 @@ struct HotkeyRecorderView: View {
 // MARK: - App Card View
 struct AppCardView: View {
     let app: AppInfo
-    /// 窗口内容预览（nil 时降级为 App 图标）
-    let preview: NSImage?
     /// 是否显示流光边框（环心卡片）。倒影复用同一视图，传 false。
     let showBorder: Bool
 
-    /// 卡片内容：窗口预览优先，无预览（无权限/无窗口）降级为 App 图标。
+    /// 卡片内容：App 图标。
     /// 应用名只显示在卡片上方（面板顶部标题），卡片内部不再重复。
     private var content: some View {
         Group {
-            if let preview = preview {
-                Image(nsImage: preview)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: Theme.cardWidth - 48, height: Theme.cardHeight - 48)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius * 0.4, style: .continuous))
-            } else if let icon = app.icon {
+            if let icon = app.icon {
                 Image(nsImage: icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: Theme.cardWidth - 48, height: Theme.cardHeight - 48)
+                    .frame(width: Theme.cardWidth - 24, height: Theme.cardHeight - 24)
             } else {
                 Image(systemName: "app.fill")
-                    .font(.system(size: 144))
+                    .font(.system(size: 72))
                     .foregroundColor(.secondary)
             }
         }
@@ -242,8 +213,8 @@ struct AppCardView: View {
     var body: some View {
         let isFront = showBorder
         return content
-            // 预览/图标与卡片边框保持 24pt 间距，最大化填满卡片
-            .padding(24)
+            // 预览/图标与卡片边框保持 12pt 间距，最大化填满卡片
+            .padding(12)
             .frame(width: Theme.cardWidth, height: Theme.cardHeight)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .background(
@@ -266,24 +237,23 @@ struct AppCardView: View {
         .overlay(
             Group {
                 if isFront {
-                    HighlightBorder(lineWidth: 6)
+                    HighlightBorder(lineWidth: 3)
                 } else {
                     RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                        .stroke(Color.white.opacity(0.20), lineWidth: 3)
+                        .stroke(Color.white.opacity(0.20), lineWidth: 1.5)
                 }
             }
         )
         // shadow 只给正面卡片：倒影若再带 shadow，切换时 6 份高斯投影逐帧重算，
         // 是 GPU 峰值主因之一。倒影靠自身 alpha 淡出即可，视觉无损。
-        .shadow(color: isFront ? Theme.accent.opacity(0.4) : .clear, radius: 24, x: 0, y: 0)
-        .shadow(color: isFront ? Color.black.opacity(0.4) : .clear, radius: 18, x: 0, y: 18)
+        .shadow(color: isFront ? Theme.accent.opacity(0.4) : .clear, radius: 12, x: 0, y: 0)
+        .shadow(color: isFront ? Color.black.opacity(0.4) : .clear, radius: 9, x: 0, y: 9)
     }
 }
 
 struct IndexedCard: View {
     let index: Int
     let app: AppInfo
-    let preview: NSImage?
     let currentIndex: Int
     let count: Int
 
@@ -308,7 +278,7 @@ struct IndexedCard: View {
     /// 相邻卡片中心距（与 240pt 卡片宽对应，环上略有重叠）
     private let slotWidth: CGFloat = Theme.slotWidth
     // 侧卡下沉量
-    private let sideDrop: CGFloat = 30   // 10 × 3
+    private let sideDrop: CGFloat = 15   // 7.5 × 2
 
     /// 中间卡片放大系数：放大后卡片栈底边与两侧卡片底边对齐
     private let frontScale: CGFloat = 1.16
@@ -328,12 +298,12 @@ struct IndexedCard: View {
 
     /// 卡片 + 下方地面倒影（随卡片一起旋转，模拟 Compiz Ring 的地板反射）
     private func cardStack(front: Bool) -> some View {
-        VStack(spacing: 18) {
-            AppCardView(app: app, preview: preview, showBorder: front)
+        VStack(spacing: 9) {
+            AppCardView(app: app, showBorder: front)
             // 倒影：垂直翻转 + 上亮下暗渐变淡出 + 轻模糊
-            AppCardView(app: app, preview: preview, showBorder: false)
+            AppCardView(app: app, showBorder: false)
                 .scaleEffect(y: -1)
-                .frame(height: 132, alignment: .top)
+                .frame(height: 66, alignment: .top)
                 .clipped()
                 .mask(
                     LinearGradient(
@@ -341,7 +311,7 @@ struct IndexedCard: View {
                         startPoint: .top, endPoint: .bottom
                     )
                 )
-                .blur(radius: 3)
+                .blur(radius: 1.5)
                 .opacity(0.6)
                 .allowsHitTesting(false)
         }
@@ -354,11 +324,11 @@ struct DotsIndicator: View {
     let currentIndex: Int
 
     var body: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 9) {
             ForEach(0..<count, id: \.self) { i in
                 Capsule()
                     .fill(i == currentIndex ? Theme.accent : Color.white.opacity(0.38))
-                    .frame(width: i == currentIndex ? 42 : 15, height: 15)
+                    .frame(width: i == currentIndex ? 21 : 7.5, height: 7.5)
                     .animation(.spring(response: 0.3, dampingFraction: 0.9), value: currentIndex)
             }
         }
@@ -367,28 +337,27 @@ struct DotsIndicator: View {
 
 struct SwitcherView: View {
     @ObservedObject var state: CubeStateModel
-    @ObservedObject private var previewProvider = WindowPreviewProvider.shared
 
     var body: some View {
         GlassContainer {
-            VStack(spacing: 42) {
+            VStack(spacing: 21) {
                 // 顶部：当前应用名
                 Text(currentAppName)
-                    .font(.system(size: 51, weight: .semibold, design: .rounded))
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
-                    .frame(height: 66)
+                    .frame(height: 33)
 
                 // 中间：卡片轮播
                 if currentApps.isEmpty {
                     VStack {
                         Image(systemName: "app.fill")
-                            .font(.system(size: 120))
+                            .font(.system(size: 60))
                             .foregroundColor(Theme.dimmerText)
                         Text("没有可切换的应用")
-                            .font(.system(size: 36))
+                            .font(.system(size: 18))
                             .foregroundColor(Theme.dimmerText)
-                            .padding(.top, 24)
+                            .padding(.top, 12)
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: Theme.cardAreaHeight)
@@ -399,7 +368,6 @@ struct SwitcherView: View {
                                 IndexedCard(
                                     index: i,
                                     app: currentApps[i],
-                                    preview: previewProvider.previews[currentApps[i].id],
                                     currentIndex: state.index,
                                     count: currentApps.count
                                 )
@@ -411,11 +379,11 @@ struct SwitcherView: View {
 
                     // 底部：进度点
                     DotsIndicator(count: currentApps.count, currentIndex: state.index)
-                        .padding(.bottom, 6)
+                        .padding(.bottom, 3)
                 }
             }
-            .padding(.horizontal, 96)
-            .padding(.top, 60)
+            .padding(.horizontal, 48)
+            .padding(.top, 30)
             .frame(width: Theme.panelWidth, height: Theme.panelHeight)
         }
         // 呼出入场 / 收起退场动画（由模型 visible 驱动，每次呼出都会重播）

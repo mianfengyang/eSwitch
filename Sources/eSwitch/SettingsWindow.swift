@@ -5,8 +5,6 @@ import SwiftUI
 var settingsWindow: NSWindow?
 
 func showSettings() {
-    // 静默刷新屏幕录制授权状态（用户可能刚在系统设置里授权）
-    WindowPreviewProvider.shared.preflight()
     if let existing = settingsWindow, existing.isVisible {
         existing.makeKeyAndOrderFront(nil)
         NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])

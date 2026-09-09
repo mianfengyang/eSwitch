@@ -13,8 +13,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
             AXIsProcessTrustedWithOptions(opts)
         }
-        // 窗口预览：启动时请求屏幕录制权限（未授权弹一次系统授权框，之后不再打扰）
-        WindowPreviewProvider.shared.requestPermission()
     }
     
     @objc func showSettingsAction() {

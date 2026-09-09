@@ -77,17 +77,12 @@ func showSwitcher() {
     // Always reposition when showing (settings may have changed)
     let screen = getTargetScreen()
     let sf = screen.visibleFrame
-    // 面板可能大于屏幕：等比缩放到屏幕 95% 内，内容同步 scaleEffect 避免裁剪
+    // 面板可能需要大于屏幕：等比缩放到屏幕 95% 内，内容同步 scaleEffect 避免裁剪
     let s = min(1.0, sf.width * 0.95 / Theme.panelWidth, sf.height * 0.95 / Theme.panelHeight)
     cubeState.scale = s
     let sw = Theme.panelWidth * s
     let sh = Theme.panelHeight * s
     switchPanel?.setFrame(NSRect(x: sf.midX - sw / 2, y: sf.midY - sh / 2, width: sw, height: sh), display: true)
-    
-    // 窗口预览：每次呼出异步刷新一次（未授权/关闭时自动跳过，卡片保持 App 图标）
-    if SettingsManager.shared.windowPreview {
-        WindowPreviewProvider.shared.refresh(apps: currentApps)
-    }
     
     switchPanel?.orderFront(nil)
 }

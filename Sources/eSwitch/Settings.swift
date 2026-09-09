@@ -30,19 +30,8 @@ class SettingsManager: ObservableObject {
         }
     }
     
-    @Published var windowPreview: Bool {
-        didSet {
-            UserDefaults.standard.set(windowPreview, forKey: "windowPreview")
-            if !windowPreview {
-                WindowPreviewProvider.shared.clear()
-            }
-        }
-    }
-    
     private init() {
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
-        // 窗口预览默认开；无屏幕录制权限时启动探测会关掉它
-        self.windowPreview = UserDefaults.standard.object(forKey: "windowPreview") as? Bool ?? true
         if let savedRaw = UserDefaults.standard.string(forKey: "panelScreenMode"),
            let mode = PanelScreenMode(rawValue: savedRaw) {
             self.panelScreenMode = mode

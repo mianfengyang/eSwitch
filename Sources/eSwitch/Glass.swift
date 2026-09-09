@@ -4,19 +4,20 @@ import SwiftUI
 // MARK: - Theme
 /// 中性灰玻璃主题。卡片描边/选中光环使用系统强调色（跟随用户系统主题）。
 /// v1.4: 面板整体 3 倍尺寸（适配 26 系统大屏），形状/比例不变。
+/// v1.5: 面板与卡片整体缩小到 3 倍的一半（即 1.5 倍基准）。
 enum Theme {
     static let accent = Color.accentColor
-    static let panelRadius: CGFloat = 72      // 24 × 3
-    static let cardRadius: CGFloat = 48       // 16 × 3
+    static let panelRadius: CGFloat = 36      // 24 × 1.5
+    static let cardRadius: CGFloat = 24       // 16 × 1.5
     static let dimText = Color.white.opacity(0.55)
     static let dimmerText = Color.white.opacity(0.4)
     // 面板固定尺寸
-    static let panelWidth: CGFloat = 1260     // 420 × 3
-    static let panelHeight: CGFloat = 810     // 270 × 3
-    static let cardWidth: CGFloat = 272       // 240 → 272，卡片整体放大
-    static let cardHeight: CGFloat = 292      // 264 → 292，卡片整体放大
-    static let slotWidth: CGFloat = 330       // 312 → 330，配合更宽卡片
-    static let cardAreaHeight: CGFloat = 478  // 450 → 478，给更大的卡片留高度
+    static let panelWidth: CGFloat = 630     // 420 × 1.5
+    static let panelHeight: CGFloat = 405     // 270 × 1.5
+    static let cardWidth: CGFloat = 136       // 卡片减半
+    static let cardHeight: CGFloat = 146      // 卡片减半
+    static let slotWidth: CGFloat = 165       // 环间距减半
+    static let cardAreaHeight: CGFloat = 239  // 卡片区高度减半
 }
 
 // MARK: - Glass Container
@@ -35,7 +36,10 @@ struct GlassContainer<Content: View>: View {
                 RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [Color.black.opacity(0.52), Color.black.opacity(0.34)],
+                            colors: [
+                                Color(red: 0.16, green: 0.17, blue: 0.20).opacity(0.94),
+                                Color(red: 0.10, green: 0.11, blue: 0.13).opacity(0.98)
+                            ],
                             startPoint: .top, endPoint: .bottom
                         )
                     )
