@@ -34,41 +34,14 @@ struct GlassContainer<Content: View>: View {
         content()
             .background(
                 RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.16, green: 0.17, blue: 0.20).opacity(0.94),
-                                Color(red: 0.10, green: 0.11, blue: 0.13).opacity(0.98)
-                            ],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [.white.opacity(0.12), .clear, .black.opacity(0.18)],
-                                    startPoint: .top, endPoint: .bottom
-                                )
-                            )
-                    )
+                    .fill(Color(red: 0.13, green: 0.14, blue: 0.16).opacity(0.96))
             )
             // 阴影交给系统窗口阴影（panel.hasShadow = true，见 Panel.swift），
             // 系统会贴合内容不透明轮廓生成圆角阴影，避免 SwiftUI 自绘阴影按
             // 视图矩形边界投影而在四角露出直角阴影。
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.28), .white.opacity(0.02), .clear],
-                            startPoint: .top, endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
             )
     }
 }

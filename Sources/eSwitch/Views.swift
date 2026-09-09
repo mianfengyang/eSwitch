@@ -218,21 +218,8 @@ struct AppCardView: View {
             .frame(width: Theme.cardWidth, height: Theme.cardHeight)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .background(
-            Group {
-                if isFront {
-                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [.white.opacity(0.20), .white.opacity(0.06), .white.opacity(0.12)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                } else {
-                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                        .fill(Color.white.opacity(0.12))
-                }
-            }
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .fill(isFront ? Color.white.opacity(0.18) : Color.white.opacity(0.10))
         )
         .overlay(
             Group {
@@ -244,10 +231,7 @@ struct AppCardView: View {
                 }
             }
         )
-        // shadow 只给正面卡片：倒影若再带 shadow，切换时 6 份高斯投影逐帧重算，
-        // 是 GPU 峰值主因之一。倒影靠自身 alpha 淡出即可，视觉无损。
-        .shadow(color: isFront ? Theme.accent.opacity(0.4) : .clear, radius: 12, x: 0, y: 0)
-        .shadow(color: isFront ? Color.black.opacity(0.4) : .clear, radius: 9, x: 0, y: 9)
+        // 移除阴影：GPU 主要消耗源。系统窗口阴影（panel.hasShadow）已提供足够深度感
     }
 }
 
@@ -311,8 +295,7 @@ struct IndexedCard: View {
                         startPoint: .top, endPoint: .bottom
                     )
                 )
-                .blur(radius: 1.5)
-                .opacity(0.6)
+                .opacity(0.5)
                 .allowsHitTesting(false)
         }
     }
