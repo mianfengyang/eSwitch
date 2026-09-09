@@ -13,11 +13,11 @@ import Foundation
 // 需要辅助功能权限（AXIsProcessTrusted），eSwitch 启动时已请求。
 typealias CGSSpaceID = UInt32
 
-private func cgsSymbol(_ name: String) -> UnsafeMutableRawPointer? {
+func cgsSymbol(_ name: String) -> UnsafeMutableRawPointer? {
     dlsym(dlopen(nil, RTLD_NOW), name)
 }
 
-private func cgsMainConnectionID() -> Int32 {
+func cgsMainConnectionID() -> Int32 {
     typealias Fn = @convention(c) () -> Int32
     if let s = cgsSymbol("CGSMainConnectionID") { return unsafeBitCast(s, to: Fn.self)() }
     return 0
@@ -175,31 +175,22 @@ func scanSpaceForApp(pid: pid_t, displays: [ManagedDisplay], uuidToDisplay: [Str
     return nil
 }
 
-// MARK: - 桌面索引缓存（按需构建，切换后顺带温一次）
+// MARK: - 桌面索引缓存（纯查询构建，不切换桌面）
 private var desktopIndex: [String: Set<pid_t>] = [:]
 private let indexQueue = DispatchQueue(label: "eswitch.desktop-index")
 private var indexLastBuilt = Date.distantPast
 
-/// 索引是否足够新鲜、可信任。应用在桌面间移动后索引会过期，超时即弃用回退扫描。
-private func indexFresh() -> Bool {
-    Date().timeIntervalSince(indexLastBuilt) < 90
+/// 重建索引并存入缓存。走 CGS 空间窗口枚举（buildDesktopIndexSilent），
+/// 纯查询、毫秒级、不切换任何桌面，因此每次激活都可即时重建。
+func buildIndexNow() {
+    let newIndex = buildDesktopIndexSilent()
+    indexQueue.sync { desktopIndex = newIndex }
+    indexLastBuilt = Date()
+    log("desktop index: rebuilt \(newIndex.count) entries")
 }
 
-/// 重建索引并存入缓存。只在一次真实激活之后顺带调用（用户正处于切换情境），
-/// 避免静默地在后台翻动用户的桌面。无权限或失败时保持旧缓存。
-func warmDesktopIndex() {
-    let now = Date()
-    guard now.timeIntervalSince(indexLastBuilt) > 10 else { return }  // 防抖
-    indexLastBuilt = now
-    log("desktop index: warming (age \(now.timeIntervalSince(indexLastBuilt))s)")
-    buildDesktopIndex { newIndex in
-        indexQueue.sync { desktopIndex = newIndex }
-        log("desktop index: warmed \(newIndex.count) entries")
-    }
-}
-
-/// 跨虚拟桌面激活应用：当前空间可见则直接激活；否则后台查找桌面索引快速跳转；
-/// 索引未命中时回退到实时逐格扫描。整个流程不阻塞 UI。
+/// 跨虚拟桌面激活应用：当前空间可见则直接激活；否则用索引精确单跳；
+/// 索引缺失时回退到实时逐格扫描。整个流程不阻塞 UI。
 func activateApp(_ app: AppInfo) {
     guard let running = NSRunningApplication(processIdentifier: app.pid) else { return }
 
@@ -216,11 +207,13 @@ func activateApp(_ app: AppInfo) {
     }
 
     DispatchQueue.global(qos: .userInitiated).async {
+        // 索引是毫秒级纯查询，每次都现建，保证最新（光标/切换动作只在跳转时发生一次）
+        buildIndexNow()
+        let snapshot = indexQueue.sync { desktopIndex }
         let displays = managedDisplaySpaces()
         let uuidToDisplay = Dictionary(uniqueKeysWithValues: onlineDisplays().map { ($0.uuid.lowercased(), $0.displayID) })
 
-        // 1) 用索引精确定位（仅当索引新鲜才可信）
-        let snapshot = indexFresh() ? (indexQueue.sync { desktopIndex }) : [:]
+        // 1) 用索引精确定位
         if let hit = locate(app.pid, in: snapshot),
            let did = uuidToDisplay[hit.display],
            let disp = displays.first(where: { $0.identifier.lowercased() == hit.display }),
@@ -248,8 +241,6 @@ func activateApp(_ app: AppInfo) {
         // 扫描结束时系统已停在该空间，稍等动画收尾再激活
         Thread.sleep(forTimeInterval: 0.4)
         running.activate(options: [.activateIgnoringOtherApps])
-        // 顺带温一次索引，下次切换可单跳直达
-        warmDesktopIndex()
     }
 }
 

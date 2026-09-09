@@ -47,6 +47,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - Main
 if CommandLine.arguments.contains("--selftest-ctrl") {
     runCtrlSelfTest()
+    exit(0)
+}
+if CommandLine.arguments.contains("--selftest-index") {
+    runIndexSelfTest()
+    exit(0)
 }
 
 let app = NSApplication.shared
