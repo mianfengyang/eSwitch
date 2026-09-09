@@ -24,6 +24,7 @@ All notable changes to CubeTab will be documented in this file.
 - 设置界面保持原样（原生 Form 风格）
 
 ### Fixed
+- **无法切换到访达** — `getApps()` 原本显式过滤掉 `com.apple.finder`，访达永远不出现在切换列表；移除该过滤，访达恢复可切换
 - **面板四角直角阴影** — 投影由直接作用于含 `NSVisualEffectView` 的复合视图改为独立圆角矩形 `.shadow()`，避免按矩形边界投影导致四角露出直角阴影/底色
 
 ---

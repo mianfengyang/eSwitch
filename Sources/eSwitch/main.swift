@@ -351,8 +351,7 @@ struct AppInfo {
 func getApps() -> [AppInfo] {
     NSWorkspace.shared.runningApplications.filter {
         $0.activationPolicy == .regular &&
-        $0.bundleIdentifier != Bundle.main.bundleIdentifier &&
-        $0.bundleIdentifier != "com.apple.finder"
+        $0.bundleIdentifier != Bundle.main.bundleIdentifier
     }.compactMap { app in
         guard let name = app.localizedName else { return nil }
         return AppInfo(id: app.bundleIdentifier ?? UUID().uuidString, name: name, icon: app.icon, pid: app.processIdentifier)
