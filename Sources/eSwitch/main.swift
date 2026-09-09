@@ -120,12 +120,20 @@ struct Hotkey: Codable, Equatable {
 
 // MARK: - Theme
 /// 中性灰玻璃主题。卡片描边/选中光环使用系统强调色（跟随用户系统主题）。
+/// v1.4: 面板整体 3 倍尺寸（适配 26 系统大屏），形状/比例不变。
 enum Theme {
     static let accent = Color.accentColor
-    static let panelRadius: CGFloat = 24
-    static let cardRadius: CGFloat = 16
+    static let panelRadius: CGFloat = 72      // 24 × 3
+    static let cardRadius: CGFloat = 48       // 16 × 3
     static let dimText = Color.white.opacity(0.55)
     static let dimmerText = Color.white.opacity(0.4)
+    // 面板固定尺寸
+    static let panelWidth: CGFloat = 1260     // 420 × 3
+    static let panelHeight: CGFloat = 810     // 270 × 3
+    static let cardWidth: CGFloat = 240       // 80 × 3
+    static let cardHeight: CGFloat = 264      // 88 × 3
+    static let slotWidth: CGFloat = 312       // 104 × 3
+    static let cardAreaHeight: CGFloat = 450  // 150 × 3
 }
 
 // MARK: - Glass Background (NSVisualEffectView)
@@ -209,8 +217,8 @@ struct GlassContainer<Content: View>: View {
             .background(
                 RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
                     .fill(Color.black)
-                    .shadow(color: .black.opacity(0.55), radius: 28, x: 0, y: 14)
-                    .shadow(color: .black.opacity(0.30), radius: 10, x: 0, y: 4)
+                    .shadow(color: .black.opacity(0.55), radius: 84, x: 0, y: 42)
+                    .shadow(color: .black.opacity(0.30), radius: 30, x: 0, y: 12)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
@@ -298,8 +306,19 @@ class SettingsManager: ObservableObject {
         }
     }
     
+    @Published var windowPreview: Bool {
+        didSet {
+            UserDefaults.standard.set(windowPreview, forKey: "windowPreview")
+            if !windowPreview {
+                WindowPreviewProvider.shared.clear()
+            }
+        }
+    }
+    
     private init() {
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
+        // 窗口预览默认开；无屏幕录制权限时启动探测会关掉它
+        self.windowPreview = UserDefaults.standard.object(forKey: "windowPreview") as? Bool ?? true
         if let savedRaw = UserDefaults.standard.string(forKey: "panelScreenMode"),
            let mode = PanelScreenMode(rawValue: savedRaw) {
             self.panelScreenMode = mode
@@ -397,9 +416,88 @@ var switchPanel: NSPanel?
 var lastSelectedBundleID: String?
 let cubeState = CubeStateModel()
 
+// MARK: - Window Preview
+/// 窗口内容预览：CGWindowList 取窗口 → CGWindowListCreateImage 截图。
+/// 需要「屏幕录制」权限；无权限/截图失败时返回 nil，卡片降级为 App 图标。
+/// 每次呼出切换器时重新截图（实时预览），后台线程执行不阻塞呼出动画。
+final class WindowPreviewProvider: ObservableObject {
+    static let shared = WindowPreviewProvider()
+
+    @Published var previews: [String: NSImage] = [:]   // AppInfo.id -> 最前窗口预览
+    @Published var granted = false                       // 屏幕录制权限状态
+
+    /// 关闭预览时清空显示，卡片回到 App 图标
+    func clear() {
+        DispatchQueue.main.async { [weak self] in
+            self?.previews = [:]
+        }
+    }
+
+    /// 启动时调用一次：请求屏幕录制权限（未授权时系统弹授权框，和辅助功能权限同机制）
+    func requestPermission() {
+        if #available(macOS 14.0, *) {
+            granted = CGRequestScreenCaptureAccess()
+        } else {
+            granted = true
+        }
+        log("Screen recording permission: \(granted)")
+    }
+
+    /// 打开设置时调用：静默检查授权状态（不弹框），授权后回来能看到状态变化
+    func preflight() {
+        if #available(macOS 14.0, *) {
+            granted = CGPreflightScreenCaptureAccess()
+        }
+        log("Screen recording preflight: \(granted)")
+    }
+
+    /// 刷新所有应用的最前窗口预览（后台线程执行，主线程更新 UI）
+    func refresh(apps: [AppInfo]) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            guard self.granted else { return }
+
+            // 列出全部正常层窗口，数组序即 z 序（索引越小越靠前）
+            let opts: CGWindowListOption = [.optionOnScreenOnly]
+            guard let raw = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] else { return }
+
+            var result: [String: NSImage] = [:]
+
+            for app in apps {
+                // 该应用最靠前的可见窗口
+                var bestID: CGWindowID?
+                var bestOrder = Int.max
+                for (i, info) in raw.enumerated() where i < bestOrder {
+                    let pid = (info[kCGWindowOwnerPID as String] as? Int) ?? -1
+                    let layer = (info[kCGWindowLayer as String] as? Int) ?? 0
+                    guard pid == Int(app.pid), layer == 0 else { continue }
+                    // 跳过 1×1 的占位窗口（某些应用有隐藏 helper 窗口）
+                    if let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
+                       bounds["Width"] ?? 0 < 8, bounds["Height"] ?? 0 < 8 { continue }
+                    bestID = (info[kCGWindowNumber as String] as? Int).map(CGWindowID.init)
+                    bestOrder = i
+                }
+                guard let id = bestID else { continue }
+
+                let options = CGWindowImageOption([.boundsIgnoreFraming, .bestResolution])
+                guard let cg = CGWindowListCreateImage(.null, .optionIncludingWindow, id, options) else { continue }
+                let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                result[app.id] = img
+            }
+
+            let g = result
+            DispatchQueue.main.async {
+                self.previews = g
+            }
+        }
+    }
+}
+
 class CubeStateModel: ObservableObject {
     @Published var index: Int = 0
     @Published var visible: Bool = false
+    /// 面板等比缩放系数：小屏上窗口缩小，内容同步 scaleEffect，避免裁剪
+    @Published var scale: CGFloat = 1.0
 }
 
 // MARK: - Settings View
@@ -431,6 +529,20 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
+
+                Toggle("卡片窗口预览", isOn: $settings.windowPreview)
+                    .toggleStyle(.switch)
+                    .padding(.vertical, 4)
+                if settings.windowPreview && !WindowPreviewProvider.shared.granted {
+                    Button("打开「隐私与安全性 → 屏幕录制」授权") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                    }
+                    .controlSize(.small)
+                    .font(.caption)
+                }
+                Text(windowPreviewHint)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             .padding()
 
@@ -472,7 +584,14 @@ struct SettingsView: View {
             }
             .padding(.vertical, 8)
         }
-        .frame(width: 340, height: 359)
+        .frame(width: 340, height: 395)
+    }
+
+    /// 窗口预览权限状态提示
+    private var windowPreviewHint: String {
+        if !settings.windowPreview { return "关闭时卡片显示 App 图标。" }
+        if WindowPreviewProvider.shared.granted { return "卡片显示各应用最前窗口的实时内容。" }
+        return "需要「屏幕录制」权限才能显示窗口内容，当前未授权（卡片暂用 App 图标）。"
     }
 }
 
@@ -591,37 +710,48 @@ struct HotkeyRecorderView: View {
 // MARK: - App Card View
 struct AppCardView: View {
     let app: AppInfo
+    /// 窗口内容预览（nil 时降级为 App 图标）
+    let preview: NSImage?
     /// 是否显示流光边框（环心卡片）。倒影复用同一视图，传 false。
     let showBorder: Bool
 
     var body: some View {
         let isFront = showBorder
-        VStack(spacing: 8) {
-            if let icon = app.icon {
+        VStack(spacing: 24) {
+            // 预览优先：有窗口截图就显示内容，没有（无权限/无窗口）降级为 App 图标
+            if let preview = preview {
+                Image(nsImage: preview)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: Theme.cardWidth - 48, height: Theme.cardHeight * 0.62)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius * 0.5, style: .continuous))
+                    .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+            } else if let icon = app.icon {
                 Image(nsImage: icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 48, height: 48)
+                    .frame(width: 144, height: 144)
             } else {
                 Image(systemName: "app.fill")
-                    .font(.system(size: 36))
+                    .font(.system(size: 108))
                     .foregroundColor(.secondary)
             }
             // 名称底板：图标背景再花也不会糊字
             Text(app.name)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .font(.system(size: 36, weight: .medium, design: .rounded))
                 .foregroundColor(isFront ? .white : Color.white.opacity(0.85))
                 .lineLimit(1)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 30)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
                 .background(
                     Capsule()
                         .fill(.black.opacity(isFront ? 0.5 : 0.35))
                 )
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 8)
-        .frame(width: 80, height: 88)
+        .padding(.vertical, 30)
+        .padding(.horizontal, 24)
+        .frame(width: Theme.cardWidth, height: Theme.cardHeight)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .background(
             Group {
@@ -643,25 +773,24 @@ struct AppCardView: View {
         .overlay(
             Group {
                 if isFront {
-                    HighlightBorder(lineWidth: 2)
+                    HighlightBorder(lineWidth: 6)
                 } else {
                     RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                        .stroke(Color.white.opacity(0.20), lineWidth: 1)
+                        .stroke(Color.white.opacity(0.20), lineWidth: 3)
                 }
             }
         )
         // shadow 只给正面卡片：倒影若再带 shadow，切换时 6 份高斯投影逐帧重算，
         // 是 GPU 峰值主因之一。倒影靠自身 alpha 淡出即可，视觉无损。
-        // 半径从 14/10 降到 8/6：高斯模糊成本随半径平方增长，动画期间每帧重算，
-        // 这是切换时 GPU 尖峰的主要来源。
-        .shadow(color: isFront ? Theme.accent.opacity(0.4) : .clear, radius: 8, x: 0, y: 0)
-        .shadow(color: isFront ? Color.black.opacity(0.4) : .clear, radius: 6, x: 0, y: 6)
+        .shadow(color: isFront ? Theme.accent.opacity(0.4) : .clear, radius: 24, x: 0, y: 0)
+        .shadow(color: isFront ? Color.black.opacity(0.4) : .clear, radius: 18, x: 0, y: 18)
     }
 }
 
 struct IndexedCard: View {
     let index: Int
     let app: AppInfo
+    let preview: NSImage?
     let currentIndex: Int
     let count: Int
 
@@ -683,8 +812,10 @@ struct IndexedCard: View {
         }
     }
 
-    /// 相邻卡片中心距（与 80pt 卡片宽对应，环上略有重叠）
-    private let slotWidth: CGFloat = 104
+    /// 相邻卡片中心距（与 240pt 卡片宽对应，环上略有重叠）
+    private let slotWidth: CGFloat = Theme.slotWidth
+    // 侧卡下沉量
+    private let sideDrop: CGFloat = 30   // 10 × 3
 
     /// 中间卡片放大系数：放大后卡片栈底边与两侧卡片底边对齐
     private let frontScale: CGFloat = 1.16
@@ -696,7 +827,7 @@ struct IndexedCard: View {
         return cardStack(front: off == 0)
             .scaleEffect(off == 0 ? frontScale : 1.0)
             .rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
-            .offset(x: CGFloat(off) * slotWidth, y: CGFloat(abs(off)) * 10)
+            .offset(x: CGFloat(off) * slotWidth, y: CGFloat(abs(off)) * sideDrop)
             .opacity(visible ? 1.0 : 0.0)
             .zIndex(off == 0 ? 10.0 : 5.0 - Double(abs(off)))
             .animation(.spring(response: 0.32, dampingFraction: 0.85), value: currentIndex)
@@ -704,12 +835,12 @@ struct IndexedCard: View {
 
     /// 卡片 + 下方地面倒影（随卡片一起旋转，模拟 Compiz Ring 的地板反射）
     private func cardStack(front: Bool) -> some View {
-        VStack(spacing: 6) {
-            AppCardView(app: app, showBorder: front)
+        VStack(spacing: 18) {
+            AppCardView(app: app, preview: preview, showBorder: front)
             // 倒影：垂直翻转 + 上亮下暗渐变淡出 + 轻模糊
-            AppCardView(app: app, showBorder: false)
+            AppCardView(app: app, preview: preview, showBorder: false)
                 .scaleEffect(y: -1)
-                .frame(height: 44, alignment: .top)
+                .frame(height: 132, alignment: .top)
                 .clipped()
                 .mask(
                     LinearGradient(
@@ -717,7 +848,7 @@ struct IndexedCard: View {
                         startPoint: .top, endPoint: .bottom
                     )
                 )
-                .blur(radius: 1)
+                .blur(radius: 3)
                 .opacity(0.6)
                 .allowsHitTesting(false)
         }
@@ -730,11 +861,11 @@ struct DotsIndicator: View {
     let currentIndex: Int
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 18) {
             ForEach(0..<count, id: \.self) { i in
                 Capsule()
                     .fill(i == currentIndex ? Theme.accent : Color.white.opacity(0.38))
-                    .frame(width: i == currentIndex ? 14 : 5, height: 5)
+                    .frame(width: i == currentIndex ? 42 : 15, height: 15)
                     .animation(.spring(response: 0.3, dampingFraction: 0.9), value: currentIndex)
             }
         }
@@ -743,29 +874,31 @@ struct DotsIndicator: View {
 
 struct SwitcherView: View {
     @ObservedObject var state: CubeStateModel
+    @ObservedObject private var previewProvider = WindowPreviewProvider.shared
 
     var body: some View {
         GlassContainer {
-            VStack(spacing: 14) {
+            VStack(spacing: 42) {
                 // 顶部：当前应用名
                 Text(currentAppName)
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(.system(size: 51, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
-                    .frame(height: 22)
+                    .frame(height: 66)
 
                 // 中间：卡片轮播
                 if currentApps.isEmpty {
                     VStack {
                         Image(systemName: "app.fill")
-                            .font(.system(size: 40))
+                            .font(.system(size: 120))
                             .foregroundColor(Theme.dimmerText)
                         Text("没有可切换的应用")
+                            .font(.system(size: 36))
                             .foregroundColor(Theme.dimmerText)
-                            .padding(.top, 8)
+                            .padding(.top, 24)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 150)
+                    .frame(height: Theme.cardAreaHeight)
                 } else {
                     GeometryReader { geo in
                         ZStack {
@@ -773,6 +906,7 @@ struct SwitcherView: View {
                                 IndexedCard(
                                     index: i,
                                     app: currentApps[i],
+                                    preview: previewProvider.previews[currentApps[i].id],
                                     currentIndex: state.index,
                                     count: currentApps.count
                                 )
@@ -780,19 +914,19 @@ struct SwitcherView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(height: 150)
+                    .frame(height: Theme.cardAreaHeight)
 
                     // 底部：进度点
                     DotsIndicator(count: currentApps.count, currentIndex: state.index)
-                        .padding(.bottom, 2)
+                        .padding(.bottom, 6)
                 }
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 20)
-            .frame(width: 420, height: 270)
+            .padding(.horizontal, 96)
+            .padding(.top, 60)
+            .frame(width: Theme.panelWidth, height: Theme.panelHeight)
         }
         // 呼出入场 / 收起退场动画（由模型 visible 驱动，每次呼出都会重播）
-        .scaleEffect(state.visible ? 1.0 : 0.94)
+        .scaleEffect(state.visible ? state.scale : 0.94 * state.scale)
         .opacity(state.visible ? 1.0 : 0.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.9), value: state.visible)
     }
@@ -859,7 +993,7 @@ func showSwitcher() {
     
     if switchPanel == nil {
         let panel = SwitchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 270),
+            contentRect: NSRect(x: 0, y: 0, width: Theme.panelWidth, height: Theme.panelHeight),
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered, defer: false
         )
@@ -879,7 +1013,17 @@ func showSwitcher() {
     // Always reposition when showing (settings may have changed)
     let screen = getTargetScreen()
     let sf = screen.visibleFrame
-    switchPanel?.setFrameOrigin(NSPoint(x: sf.midX - 210, y: sf.midY - 135))
+    // 面板可能大于屏幕：等比缩放到屏幕 95% 内，内容同步 scaleEffect 避免裁剪
+    let s = min(1.0, sf.width * 0.95 / Theme.panelWidth, sf.height * 0.95 / Theme.panelHeight)
+    cubeState.scale = s
+    let sw = Theme.panelWidth * s
+    let sh = Theme.panelHeight * s
+    switchPanel?.setFrame(NSRect(x: sf.midX - sw / 2, y: sf.midY - sh / 2, width: sw, height: sh), display: true)
+    
+    // 窗口预览：每次呼出异步刷新一次（未授权/关闭时自动跳过，卡片保持 App 图标）
+    if SettingsManager.shared.windowPreview {
+        WindowPreviewProvider.shared.refresh(apps: currentApps)
+    }
     
     switchPanel?.orderFront(nil)
 }
@@ -1003,6 +1147,8 @@ func setupKeyboard() {
 var settingsWindow: NSWindow?
 
 func showSettings() {
+    // 静默刷新屏幕录制授权状态（用户可能刚在系统设置里授权）
+    WindowPreviewProvider.shared.preflight()
     if let existing = settingsWindow, existing.isVisible {
         existing.makeKeyAndOrderFront(nil)
         NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
@@ -1010,7 +1156,7 @@ func showSettings() {
     }
     
     let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 340, height: 359),
+        contentRect: NSRect(x: 0, y: 0, width: 340, height: 395),
         styleMask: [.titled, .closable],
         backing: .buffered,
         defer: false
@@ -1117,6 +1263,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
             AXIsProcessTrustedWithOptions(opts)
         }
+        // 窗口预览：启动时请求屏幕录制权限（未授权弹一次系统授权框，之后不再打扰）
+        WindowPreviewProvider.shared.requestPermission()
     }
     
     @objc func showSettingsAction() {
