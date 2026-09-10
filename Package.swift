@@ -13,6 +13,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "eSwitch",
+            path: "eSwitch",
             exclude: ["Resources/Info.plist", "Resources/Assets.xcassets", "eSwitch.entitlements", "Resources/eSwitch.icns"],
 
             linkerSettings: [

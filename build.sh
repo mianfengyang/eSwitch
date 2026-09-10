@@ -4,7 +4,7 @@ set -e
 APP_NAME="eSwitch"
 BUILD_DIR=".build/arm64-apple-macosx/release"
 APP_BUNDLE="build/${APP_NAME}.app"
-ENTITLEMENTS="Sources/eSwitch/eSwitch.entitlements"
+ENTITLEMENTS="eSwitch/eSwitch.entitlements"
 
 # 签名身份：优先用环境变量 CODESIGN_IDENTITY 覆盖；否则取钥匙串里第一个 Apple Development 证书。
 # 固定身份 + 固定 bundle ID（com.mfyang.eswitch）是 TCC 跨更新保留权限的关键：
@@ -42,13 +42,13 @@ cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 # Copy the icon
-if [ -f "Sources/eSwitch/Resources/eSwitch.icns" ]; then
-    cp "Sources/eSwitch/Resources/eSwitch.icns" "$APP_BUNDLE/Contents/Resources/"
+if [ -f "eSwitch/Resources/eSwitch.icns" ]; then
+    cp "eSwitch/Resources/eSwitch.icns" "$APP_BUNDLE/Contents/Resources/"
 fi
 
 # Copy Assets.xcassets (for Xcode compatibility, optional)
-if [ -d "Sources/eSwitch/Resources/Assets.xcassets" ]; then
-    cp -r "Sources/eSwitch/Resources/Assets.xcassets" "$APP_BUNDLE/Contents/Resources/"
+if [ -d "eSwitch/Resources/Assets.xcassets" ]; then
+    cp -r "eSwitch/Resources/Assets.xcassets" "$APP_BUNDLE/Contents/Resources/"
 fi
 
 # Step 3: Create Info.plist
