@@ -26,6 +26,13 @@ func appHasWindows(pid: pid_t) -> Bool {
     return false
 }
 
+/// Finder 是特殊系统进程：桌面/Dock 层不是用户可操作的窗口。
+/// 不能用普通窗口检测，需要走 Finder 专属激活路径。
+private let finderBundleID = "com.apple.finder"
+func isFinder(_ appInfo: AppInfo) -> Bool {
+    return appInfo.id == finderBundleID
+}
+
 func getApps() -> [AppInfo] {
     NSWorkspace.shared.runningApplications.filter { app in
         // 1) 只列常规 GUI 应用，排除 eSwitch 自身（.accessory）

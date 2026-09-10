@@ -189,9 +189,19 @@ func buildIndexNow() {
     log("desktop index: rebuilt \(newIndex.count) entries")
 }
 
+/// Finder bundle identifier — 系统进程，必须走 AppleScript 激活
+private let kFinderBundleID = "com.apple.finder"
+
 /// 跨虚拟桌面激活应用：当前空间可见则直接激活；否则用索引精确单跳；
 /// 索引缺失时回退到实时逐格扫描。整个流程不阻塞 UI。
 func activateApp(_ app: AppInfo) {
+    // Finder 是系统进程，NSRunningApplication.activate 对它无效（静默忽略）
+    // 必须用 AppleScript "tell application 'Finder' to activate" 才能 bring-to-front
+    if app.id == kFinderBundleID {
+        activateFinder()
+        return
+    }
+
     guard let running = NSRunningApplication(processIdentifier: app.pid) else { return }
 
     // 当前空间可见 → 直接激活
@@ -241,6 +251,26 @@ func activateApp(_ app: AppInfo) {
         // 扫描结束时系统已停在该空间，稍等动画收尾再激活
         Thread.sleep(forTimeInterval: 0.4)
         running.activate(options: [.activateIgnoringOtherApps])
+    }
+}
+
+/// Finder 专属激活方法：用 osascript + AppleScript 让 Finder bring itself forward。
+/// NSRunningApplication.activate() 对 Finder 无效（Finder 是系统进程，忽略此调用）。
+private func activateFinder() {
+    let script = """
+    tell application "Finder" to activate
+    """
+    DispatchQueue.global(qos: .userInitiated).async {
+        log("activating Finder via osascript")
+        // Finder 在后台时可能需要先启动
+        NSWorkspace.shared.launchApplication("Finder")
+        // 用 AppleScript 可靠激活
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", script]
+        task.launch()
+        task.waitUntilExit()
+        log("Finder activated: exitCode=\(task.terminationStatus)")
     }
 }
 
