@@ -217,6 +217,28 @@ func activateApp(_ app: AppInfo) {
     }
 
     DispatchQueue.global(qos: .userInitiated).async {
+        // —— Orbit 方案：跨空间激活直接交给系统原生 activateAllWindows
+        // （=Cmd+Tab 语义：把目标应用在所有 Space 的窗口带上来并前置），
+        // 不需要自己跳桌面，从根上消除跳桌面/合成按键竞态。
+        let activateOptions: NSApplication.ActivationOptions = {
+            if #available(macOS 14.0, *) {
+                return [.activateAllWindows]
+            }
+            return [.activateAllWindows, .activateIgnoringOtherApps]
+        }()
+        if running.activate(options: activateOptions) {
+            for _ in 0..<6 { // 激活异步生效，最多轮询 ~1.2s 等窗口上屏
+                if appOnScreen(pid: app.pid) {
+                    log("activating \(app.name): Orbit activateAllWindows 生效（窗口拉回当前 Space）")
+                    return
+                }
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            log("activating \(app.name): Orbit activateAllWindows 后仍无窗口上屏，回退原跳桌面方案")
+        } else {
+            log("activating \(app.name): Orbit activateAllWindows 调用失败，回退原跳桌面方案")
+        }
+
         // 索引是毫秒级纯查询，每次都现建，保证最新（光标/切换动作只在跳转时发生一次）
         buildIndexNow()
         let snapshot = indexQueue.sync { desktopIndex }
@@ -257,11 +279,37 @@ func activateApp(_ app: AppInfo) {
 /// Finder 专属激活方法：用 osascript + AppleScript 让 Finder bring itself forward。
 /// NSRunningApplication.activate() 对 Finder 无效（Finder 是系统进程，忽略此调用）。
 private func activateFinder() {
-    let script = """
-    tell application "Finder" to activate
-    """
+    // 与普通应用"拉到当前桌面"相反，Finder 保持"跳转到所在桌面"的语义
+    let finderPid = NSRunningApplication.runningApplications(withBundleIdentifier: kFinderBundleID).first?.processIdentifier ?? 0
     DispatchQueue.global(qos: .userInitiated).async {
         log("activating Finder via osascript")
+        var jumpedToFinderSpace = false
+        // 不在当前桌面时才跳转（避免无谓的桌面动画）
+        if finderPid != 0 && !appOnScreen(pid: finderPid) {
+            buildIndexNow()
+            let snapshot = indexQueue.sync { desktopIndex }
+            let displays = managedDisplaySpaces()
+            let uuidToDisplay = Dictionary(uniqueKeysWithValues: onlineDisplays().map { ($0.uuid.lowercased(), $0.displayID) })
+
+            if let hit = locate(finderPid, in: snapshot),
+               let did = uuidToDisplay[hit.display],
+               let disp = displays.first(where: { $0.identifier.lowercased() == hit.display }),
+               hit.desktopIndex < disp.spaceIDs.count {
+                let ring = disp.spaceIDs
+                log("activating Finder: index hit \(hit.display)@\(hit.desktopIndex) (space \(ring[hit.desktopIndex]))")
+                warpCursorToDisplay(did)
+                Thread.sleep(forTimeInterval: 0.08)
+                jumpedToFinderSpace = jumpToSpaceIndex(hit.desktopIndex, identifier: disp.identifier, ring: ring)
+            }
+            if !jumpedToFinderSpace,
+               let target = scanSpaceForApp(pid: finderPid, displays: displays, uuidToDisplay: uuidToDisplay) {
+                log("activating Finder: found on space \(target)")
+                jumpedToFinderSpace = true
+            }
+            if jumpedToFinderSpace {
+                Thread.sleep(forTimeInterval: 0.4)
+            }
+        }
         // Finder 在后台时可能需要先启动（非弃用 API：openApplication）
         if let finderURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: kFinderBundleID) {
             NSWorkspace.shared.openApplication(at: finderURL, configuration: NSWorkspace.OpenConfiguration())
@@ -269,7 +317,7 @@ private func activateFinder() {
         // 用 AppleScript 可靠激活
         let task = Process()
         task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
+        task.arguments = ["-e", "tell application \"Finder\" to activate"]
         task.launch()
         task.waitUntilExit()
         log("Finder activated: exitCode=\(task.terminationStatus)")

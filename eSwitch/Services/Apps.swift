@@ -21,7 +21,7 @@ func appHasWindows(pid: pid_t) -> Bool {
         let w = bounds["Width"] ?? 0
         let h = bounds["Height"] ?? 0
         // 过滤细窄窗口（菜单栏/状态栏等），只算真实窗口
-        if w > 100 && h > 100 { return true }
+        if w > 0 && h > 0 { return true }
     }
     return false
 }
@@ -34,17 +34,28 @@ func isFinder(_ appInfo: AppInfo) -> Bool {
 }
 
 func getApps() -> [AppInfo] {
-    NSWorkspace.shared.runningApplications.filter { app in
+    NSWorkspace.shared.runningApplications.compactMap { app in
+        var reason: String? = nil
         // 1) 只列常规 GUI 应用，排除 eSwitch 自身（.accessory）
-        app.activationPolicy == .regular &&
-        app.bundleIdentifier != Bundle.main.bundleIdentifier &&
-        // 2) 排除正在退出的进程（"没退干净"的僵尸状态）
-        !app.isTerminated &&
-        // 3) 排除 ⌘H 隐藏的应用
-        !app.isHidden &&
-        // 4) 兜底：进程活着但没有任何可用窗口的，不列
-        appHasWindows(pid: app.processIdentifier)
-    }.compactMap { app in
+        if app.activationPolicy != .regular {
+            reason = "activationPolicy=\(app.activationPolicy.rawValue)"
+        } else if app.bundleIdentifier == Bundle.main.bundleIdentifier {
+            reason = "self"
+        } else if app.isTerminated {
+            // 2) 排除正在退出的进程（"没退干净"的僵尸状态）
+            reason = "terminated"
+        } else if app.isHidden {
+            // 3) 排除 ⌘H 隐藏的应用
+            reason = "hidden"
+        } else if !appHasWindows(pid: app.processIdentifier) {
+            // 4) 兜底：进程活着但没有任何可用窗口的，不列
+            reason = "no visible window"
+        }
+
+        if reason != nil {
+            log("getApps: skip \(app.localizedName ?? "pid \(app.processIdentifier)") — \(reason!)")
+            return nil
+        }
         guard let name = app.localizedName else { return nil }
         return AppInfo(id: app.bundleIdentifier ?? UUID().uuidString, name: name, icon: app.icon, pid: app.processIdentifier)
     }
