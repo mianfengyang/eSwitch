@@ -24,6 +24,9 @@ All notable changes to CubeTab will be documented in this file.
     - 面板呼出/收起整体 scale + 淡入淡出弹簧动画（由状态模型驱动，每次呼出重播）
 
 ### Changed
+- **GPU 占用优化** — 移除卡片双层阴影（切换动画时每帧重算高斯投影，是 GPU 峰值主因）、倒影高斯模糊，以及面板/卡片的 3 层渐变叠加，改为单层低密度纯色渲染；持续与峰值 GPU 占用显著下降，视觉基本不变（系统窗口阴影仍提供深度感）
+- **恢复两侧卡片 3D 斜切** — 重新启用侧卡绕 Y 轴透视旋转，保留 Compiz Ring 的环形纵深观感
+- **移除弃用 API** — `NSWorkspace.launchApplication("Finder")` 改为 `openApplication(at:configuration:)`，消除 macOS 11+ 编译警告
 - 卡片描边由纯白 3px 改为流光边框（16% 亮弧旋转），未选中卡加 1px 细描边
 - 卡片阴影统一加深，玻璃背景下对比度更清晰
 - 设置界面保持原样（原生 Form 风格）
