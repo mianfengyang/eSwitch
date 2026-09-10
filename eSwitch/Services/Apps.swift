@@ -14,11 +14,13 @@ func appHasWindows(pid: pid_t) -> Bool {
     for info in raw {
         guard ((info[kCGWindowOwnerPID as String] as? Int) ?? -1) == Int(pid) else { continue }
         let layer = (info[kCGWindowLayer as String] as? Int) ?? 0
-        guard layer == 0 else { continue }
+        // 不限制 layer：Finder 桌面/Dock 是 layer 1，正常窗口是 layer 0，
+        // 限制 layer == 0 会导致 Finder 被漏掉。只要窗口尺寸满足要求就算。
+        guard layer != 2 && layer != 8 else { continue }  // 排除背景/面板层
         let bounds = info[kCGWindowBounds as String] as? [String: CGFloat] ?? [:]
         let w = bounds["Width"] ?? 0
         let h = bounds["Height"] ?? 0
-        // 过滤系统菜单栏/状态栏等细窄窗口（如 1920x30），只算真实窗口
+        // 过滤细窄窗口（菜单栏/状态栏等），只算真实窗口
         if w > 100 && h > 100 { return true }
     }
     return false
