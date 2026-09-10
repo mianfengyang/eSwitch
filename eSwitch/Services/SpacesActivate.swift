@@ -262,8 +262,10 @@ private func activateFinder() {
     """
     DispatchQueue.global(qos: .userInitiated).async {
         log("activating Finder via osascript")
-        // Finder 在后台时可能需要先启动
-        NSWorkspace.shared.launchApplication("Finder")
+        // Finder 在后台时可能需要先启动（非弃用 API：openApplication）
+        if let finderURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: kFinderBundleID) {
+            NSWorkspace.shared.openApplication(at: finderURL, configuration: NSWorkspace.OpenConfiguration())
+        }
         // 用 AppleScript 可靠激活
         let task = Process()
         task.launchPath = "/usr/bin/osascript"
