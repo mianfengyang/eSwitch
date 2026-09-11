@@ -64,7 +64,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 	<key>CFBundleIdentifier</key>
 	<string>${BUNDLE_ID}</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.4</string>
+	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleExecutable</key>
