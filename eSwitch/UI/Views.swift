@@ -187,26 +187,64 @@ struct HotkeyRecorderView: View {
     }
 }
 
+// MARK: - App Name Initial
+extension String {
+    /// 应用名首字母：英文取首个字母（大写）；中文取首字的拼音首字母；
+    /// 跳过无法转换出字母的字符（emoji、符号等）；都找不到时回退首个字符。
+    var switcherInitial: String {
+        let s = trimmingCharacters(in: .whitespacesAndNewlines)
+        for ch in s {
+            if ch.isASCII {
+                // ASCII 下：字母直接采用；空格跳过（取下一个词）；其它符号无法出字母，终止
+                if "a"..."z" ~= ch || "A"..."Z" ~= ch {
+                    return ch.uppercased()
+                }
+                if ch == " " { continue }
+                break
+            }
+            let mut = NSMutableString(string: String(ch))
+            CFStringTransform(mut, nil, kCFStringTransformMandarinLatin, false)
+            CFStringTransform(mut, nil, kCFStringTransformStripDiacritics, false)
+            if let letter = (mut as String).unicodeScalars.first,
+               "a"..."z" ~= Character(letter) || "A"..."Z" ~= Character(letter) {
+                return Character(letter).uppercased().description
+            }
+            // 该字符无法转换出字母（emoji 等），继续找下一个
+        }
+        guard let first = s.first else { return "?" }
+        return first.uppercased().description
+    }
+}
+
 // MARK: - App Card View
 struct AppCardView: View {
     let app: AppInfo
     /// 是否显示流光边框（环心卡片）。倒影复用同一视图，传 false。
     let showBorder: Bool
 
-    /// 卡片内容：App 图标。
-    /// 应用名只显示在卡片上方（面板顶部标题），卡片内部不再重复。
+    /// 首字母展示色
+    private static let initialColor = Color(red: 0xEB / 255, green: 0x62 / 255, blue: 0x17 / 255)
+
+    /// 卡片内容：App 图标 + 顶部应用名首字母。
+    /// 应用全名只显示在卡片上方（面板顶部标题），卡片内部只留首字母。
     private var content: some View {
-        Group {
+        ZStack(alignment: .top) {
             if let icon = app.icon {
                 Image(nsImage: icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: Theme.cardWidth - 24, height: Theme.cardHeight - 24)
+                    .padding(.top, 18)
             } else {
                 Image(systemName: "app.fill")
                     .font(.system(size: 72))
                     .foregroundColor(.secondary)
             }
+            Text(app.name.switcherInitial)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundColor(Self.initialColor)
+                .opacity(0.95)
+                .padding(.top, 2)
         }
     }
 
