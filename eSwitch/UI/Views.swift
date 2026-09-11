@@ -187,43 +187,16 @@ struct HotkeyRecorderView: View {
     }
 }
 
-// MARK: - App Name Initial
-extension String {
-    /// 应用名首字母：英文取首个字母（大写）；中文取首字的拼音首字母；
-    /// 跳过无法转换出字母的字符（emoji、符号等）；都找不到时回退首个字符。
-    var switcherInitial: String {
-        let s = trimmingCharacters(in: .whitespacesAndNewlines)
-        for ch in s {
-            if ch.isASCII {
-                // ASCII 下：字母直接采用；空格跳过（取下一个词）；其它符号无法出字母，终止
-                if "a"..."z" ~= ch || "A"..."Z" ~= ch {
-                    return ch.uppercased()
-                }
-                if ch == " " { continue }
-                break
-            }
-            let mut = NSMutableString(string: String(ch))
-            CFStringTransform(mut, nil, kCFStringTransformMandarinLatin, false)
-            CFStringTransform(mut, nil, kCFStringTransformStripDiacritics, false)
-            if let letter = (mut as String).unicodeScalars.first,
-               "a"..."z" ~= Character(letter) || "A"..."Z" ~= Character(letter) {
-                return Character(letter).uppercased().description
-            }
-            // 该字符无法转换出字母（emoji 等），继续找下一个
-        }
-        guard let first = s.first else { return "?" }
-        return first.uppercased().description
-    }
-}
-
 // MARK: - App Card View
 struct AppCardView: View {
     let app: AppInfo
     /// 是否显示流光边框（环心卡片）。倒影复用同一视图，传 false。
     let showBorder: Bool
+    /// 是否在卡片顶部叠加同字母候选角标（字母定位时调用方判定后传入）
+    var showCandidateBadge: Bool = false
 
-    /// 首字母展示色
-    private static let initialColor = Color(red: 0xEB / 255, green: 0x62 / 255, blue: 0x17 / 255)
+    /// 首字母展示色（#EB6217）
+    static let initialColor = Color(red: 0xEB / 255, green: 0x62 / 255, blue: 0x17 / 255)
 
     /// 卡片内容：App 图标 + 顶部应用名首字母。
     /// 应用全名只显示在卡片上方（面板顶部标题），卡片内部只留首字母。
@@ -254,6 +227,20 @@ struct AppCardView: View {
             // 预览/图标与卡片边框保持 12pt 间距，最大化填满卡片
             .padding(12)
             .frame(width: Theme.cardWidth, height: Theme.cardHeight)
+            .overlay(alignment: .top) {
+                if showCandidateBadge {
+                    // 字母定位候选角标：同首字母应用保留原环位并高亮提示
+                    // （环心卡片不叠加：其内容区首字母已足够醒目）
+                    Text(app.name.switcherInitial)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(AppCardView.initialColor)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(Color.white.opacity(0.22)))
+                        .padding(.top, 6)
+                        .transition(.opacity)
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
@@ -278,6 +265,10 @@ struct IndexedCard: View {
     let app: AppInfo
     let currentIndex: Int
     let count: Int
+    /// 字母定位：同首字母候选下标列表（非定位模式传 []）
+    var candidates: [Int] = []
+    /// 字母定位跳转目标（环心内容来源，非定位模式传 nil）
+    var jumpIndex: Int? = nil
 
     /// 归一化环偏移：-1..1 为可见邻位，0 为环心
     private var normalizedOffset: Int {
@@ -313,17 +304,21 @@ struct IndexedCard: View {
             .scaleEffect(off == 0 ? frontScale : 1.0)
             .rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
             .offset(x: CGFloat(off) * slotWidth, y: CGFloat(abs(off)) * sideDrop)
-            .opacity(visible ? 1.0 : 0.0)
+            // 字母定位：候选卡片保留原环位、仅提亮；非候选非环心卡片压暗
+            .opacity(visible ? (jumpIndex == nil || off == 0 || candidates.contains(index) ? 1.0 : 0.35) : 0.0)
             .zIndex(off == 0 ? 10.0 : 5.0 - Double(abs(off)))
             .animation(.spring(response: 0.32, dampingFraction: 0.85), value: currentIndex)
     }
 
     /// 卡片 + 下方地面倒影（随卡片一起旋转，模拟 Compiz Ring 的地板反射）
     private func cardStack(front: Bool) -> some View {
-        VStack(spacing: 9) {
-            AppCardView(app: app, showBorder: front)
-            // 倒影：垂直翻转 + 上亮下暗渐变淡出 + 轻模糊
-            AppCardView(app: app, showBorder: false)
+        let isJump = jumpIndex != nil
+        let cardIdx = front ? (jumpIndex ?? index) : index
+        let isCandidate = isJump && candidates.contains(cardIdx)
+        return VStack(spacing: 9) {
+            AppCardView(app: app, showBorder: front, showCandidateBadge: isCandidate)
+            // 倒影：垂直翻转 + 上亮下暗渐变淡出 + 轻模糊（角标随主卡镜像）
+            AppCardView(app: app, showBorder: false, showCandidateBadge: isCandidate)
                 .scaleEffect(y: -1)
                 .frame(height: 66, alignment: .top)
                 .clipped()
@@ -359,11 +354,16 @@ struct DotsIndicator: View {
 struct SwitcherView: View {
     @ObservedObject var state: CubeStateModel
 
+    /// 当前环心卡片下标：字母定位跳转时以 jumpIndex 为准，否则跟随 index。
+    private var frontIndex: Int {
+        state.jumpIndex ?? state.index
+    }
+
     var body: some View {
         GlassContainer {
             VStack(spacing: 21) {
-                // 顶部：当前应用名
-                Text(currentAppName)
+                // 顶部：当前应用名（字母定位后显示跳转目标）
+                Text(frontAppName)
                     .font(.system(size: 26, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
@@ -386,11 +386,14 @@ struct SwitcherView: View {
                     GeometryReader { geo in
                         ZStack {
                             ForEach(currentApps.indices, id: \.self) { i in
+                                let cardIdx = i == state.index ? frontIndex : i
                                 IndexedCard(
                                     index: i,
-                                    app: currentApps[i],
+                                    app: currentApps[cardIdx],
                                     currentIndex: state.index,
-                                    count: currentApps.count
+                                    count: currentApps.count,
+                                    candidates: state.candidates,
+                                    jumpIndex: state.jumpIndex
                                 )
                             }
                         }
@@ -398,8 +401,8 @@ struct SwitcherView: View {
                     }
                     .frame(height: Theme.cardAreaHeight)
 
-                    // 底部：进度点
-                    DotsIndicator(count: currentApps.count, currentIndex: state.index)
+                    // 底部：进度点（字母定位时指示环心）
+                    DotsIndicator(count: currentApps.count, currentIndex: frontIndex)
                         .padding(.bottom, 3)
                 }
             }
@@ -413,8 +416,8 @@ struct SwitcherView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.9), value: state.visible)
     }
 
-    private var currentAppName: String {
-        guard !currentApps.isEmpty, state.index < currentApps.count else { return " " }
-        return currentApps[state.index].name
+    private var frontAppName: String {
+        guard frontIndex < currentApps.count else { return " " }
+        return currentApps[frontIndex].name
     }
 }

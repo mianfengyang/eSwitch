@@ -75,6 +75,38 @@ struct HotkeyTests {
     }
 }
 
+@Suite("App 首字母与字母跳转")
+struct AppNamingTests {
+    @Test("英文取首个字母（大写）")
+    func english() {
+        #expect("Safari".switcherInitial == "S")
+        #expect("google chrome".switcherInitial == "G")
+        #expect("QQ".switcherInitial == "Q")
+    }
+
+    @Test("中文取拼音首字母")
+    func chinese() {
+        #expect("访达".switcherInitial == "F")
+        #expect("微信".switcherInitial == "W")
+        #expect("终端".switcherInitial == "Z")
+    }
+
+    @Test("emoji/符号跳过，空白名回退 ?")
+    func symbols() {
+        #expect("📷相机".switcherInitial == "X")
+        #expect("  Safari".switcherInitial == "S")
+        #expect("".switcherInitial == "?")
+    }
+
+    @Test("letterMatchIndices 返回全部同首字母下标")
+    func matchIndices() {
+        let names = ["Safari", "访达", "微信", "设置", "Google Chrome"]
+        #expect(letterMatchIndices(names: names, letter: "S") == [0, 3])
+        #expect(letterMatchIndices(names: names, letter: "W") == [2])
+        #expect(letterMatchIndices(names: names, letter: "X") == [])
+    }
+}
+
 @Suite("SettingsManager 快捷键持久化")
 struct SettingsHotkeyTests {
     private let showKey = "hotkeyShow"

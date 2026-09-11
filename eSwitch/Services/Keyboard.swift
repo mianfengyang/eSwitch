@@ -4,6 +4,16 @@ import CoreGraphics
 // MARK: - Keyboard
 var globalEventTap: CFMachPort?
 
+/// 从 CGEvent 取按键产生的字符（首个）。受 layout 影响、忽略 command 修饰（大小写由 shift 决定），
+/// 用于「按住呼出修饰键按字母」的快速定位。
+func cgEventLetter(_ event: CGEvent) -> Character? {
+    var buffer = [UniChar](repeating: 0, count: 8)
+    var actual = 0
+    event.keyboardGetUnicodeString(maxStringLength: 8, actualStringLength: &actual, unicodeString: &buffer)
+    guard actual > 0 else { return nil }
+    return String(utf16CodeUnits: buffer, count: actual).first
+}
+
 /// 录制快捷键期间暂停/恢复全局事件监听
 func setHotkeyTapEnabled(_ enabled: Bool) {
     guard let tap = globalEventTap else { return }
@@ -58,6 +68,18 @@ func setupKeyboard() {
                         if isVisible { rotateNext() } else { showSwitcher() }
                     }
                     return nil
+                } else if mods == show.modifiers,
+                          let letter = cgEventLetter(event),
+                          "a"..."z" ~= letter || "A"..."Z" ~= letter {
+                    // 快速定位：按住呼出修饰键按字母 → 跳到该字母应用（同字母多个时右侧候选高亮，再按轮换）
+                    if isVisible {
+                        log("jump letter '\(letter)'")
+                        let l = letter
+                        DispatchQueue.main.async { jumpToLetter(l) }
+                        return nil
+                    }
+                    // 未显示时是呼出修饰键的组合（非呼出键本身），让事件继续透传
+                    return Unmanaged.passUnretained(event)
                 } else if isVisible && mods == prev.modifiers && keyCode == prev.keyCode {
                     // 反向切换：上一个
                     DispatchQueue.main.async { rotatePrev() }

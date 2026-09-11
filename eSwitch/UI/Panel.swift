@@ -51,6 +51,8 @@ func showSwitcher() {
     }
     
     cubeState.index = startIndex
+    cubeState.jumpIndex = nil
+    cubeState.candidates = []
     currentIndex = startIndex
     isVisible = true
     cubeState.visible = true
@@ -93,15 +95,25 @@ func hideSwitcher(activate: Bool = true) {
     cubeState.visible = false
     switchPanel?.orderOut(nil)
     
-    if activate, !currentApps.isEmpty && currentIndex < currentApps.count {
-        let target = currentApps[currentIndex]
-        lastSelectedBundleID = target.id
-        activateApp(target)
+    if activate {
+        // 字母定位后环心与 index 可能不同步，以环心为准激活
+        let idx = cubeState.jumpIndex ?? currentIndex
+        if !currentApps.isEmpty, idx >= 0, idx < currentApps.count {
+            let target = currentApps[idx]
+            lastSelectedBundleID = target.id
+            activateApp(target)
+        }
     }
 }
 
 func rotateNext() {
     guard !currentApps.isEmpty else { return }
+    // 普通旋转退出字母定位态，否则环心渲染仍被 jumpIndex 压住
+    if cubeState.jumpIndex != nil {
+        cubeState.jumpIndex = nil
+        cubeState.candidates = []
+        log("jump state cleared by rotation")
+    }
     currentIndex = (currentIndex + 1) % currentApps.count
     cubeState.index = currentIndex
     log("rotate -> \(currentIndex): \(currentApps[currentIndex].name)")
@@ -109,7 +121,45 @@ func rotateNext() {
 
 func rotatePrev() {
     guard !currentApps.isEmpty else { return }
+    if cubeState.jumpIndex != nil {
+        cubeState.jumpIndex = nil
+        cubeState.candidates = []
+        log("jump state cleared by rotation")
+    }
     currentIndex = (currentIndex - 1 + currentApps.count) % currentApps.count
     cubeState.index = currentIndex
     log("rotate <- \(currentIndex): \(currentApps[currentIndex].name)")
+}
+
+// MARK: - Letter Jump（快速定位）
+/// 计算首字母匹配的下标列表（纯函数，可单测）
+func letterMatchIndices(names: [String], letter: String) -> [Int] {
+    names.indices.filter { names[$0].switcherInitial == letter }
+}
+
+/// 按住呼出修饰键按字母 → 对应应用跳到环心；同字母多个时其余的作候选（原位高亮角标）。
+/// 已定位到该字母的某个应用 → 再按同字母在匹配列表中轮换。
+func jumpToLetter(_ letter: Character) {
+    guard !currentApps.isEmpty else { return }
+    let up = letter.uppercased()
+    let matches = letterMatchIndices(names: currentApps.map(\.name), letter: up)
+    guard let first = matches.first else {
+        log("jump '\(up)': no match")
+        return
+    }
+    // 已定位到该字母的某个应用 → 轮换到下一个；否则定位到第一个
+    let next: Int
+    if let cur = cubeState.jumpIndex, let pos = matches.firstIndex(of: cur) {
+        next = matches[(pos + 1) % matches.count]
+    } else {
+        next = first
+    }
+    let others = matches.filter { $0 != next }
+    DispatchQueue.main.async {
+        cubeState.jumpIndex = next
+        cubeState.candidates = Array(others.prefix(2))
+        cubeState.index = next
+        currentIndex = next
+        log("jump '\(up)' -> \(next): \(currentApps[next].name) (matches: \(matches.map { currentApps[$0].name }))")
+    }
 }

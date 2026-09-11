@@ -27,7 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         if AXIsProcessTrusted() {
             alert.messageText = "辅助功能权限已启用"
-            alert.informativeText = "使用 \(hk.displayString) 呼出切换器。\n按住 \(hk.modifierString)，每按一次按键切换到下一个应用。\n\(hk.releaseHint)激活当前应用。\n\n可在「设置...」中自定义快捷键。"
+            alert.informativeText = "使用 \(hk.displayString) 呼出切换器。\n按住 \(hk.modifierString)，每按一次按键切换到下一个应用。\n\(hk.releaseHint)激活当前应用。\n按住 \(hk.modifierString) 按字母（如 A）可快速定位到该字母应用。\n\n可在「设置...」中自定义快捷键。"
             alert.alertStyle = .informational
         } else {
             alert.messageText = "需要辅助功能权限"
