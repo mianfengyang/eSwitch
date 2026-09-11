@@ -3,8 +3,6 @@ import SwiftUI
 
 // MARK: - Theme
 /// 中性灰玻璃主题。卡片描边/选中光环使用系统强调色（跟随用户系统主题）。
-/// v1.4: 面板整体 3 倍尺寸（适配 26 系统大屏），形状/比例不变。
-/// v1.5: 面板与卡片整体缩小到 3 倍的一半（即 1.5 倍基准）。
 enum Theme {
     static let accent = Color.accentColor
     static let panelRadius: CGFloat = 36      // 24 × 1.5

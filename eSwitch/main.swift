@@ -1,3 +1,6 @@
+// eSwitch — macOS 应用切换器
+// Author: Mianfeng Yang (杨绵峰)
+
 import AppKit
 import ApplicationServices
 
