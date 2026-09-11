@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# 路径一律基于脚本自身所在目录（项目根），不依赖调用方的 cwd
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# 路径一律基于脚本所在目录的上一级（项目根），不依赖调用方的 cwd
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ORIG_PWD=$(pwd)
-cd "$SCRIPT_DIR"
+cd "$ROOT"
 
 APP_NAME="eSwitch"
 APP_BUNDLE="build/${APP_NAME}.app"

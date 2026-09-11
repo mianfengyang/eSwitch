@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# 路径一律基于脚本所在目录的上一级（项目根），不依赖调用方的 cwd
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT"
+
 APP_NAME="eSwitch"
 BUILD_DIR=".build/arm64-apple-macosx/release"
 APP_BUNDLE="build/${APP_NAME}.app"
@@ -94,7 +98,7 @@ echo "签名完成: $APP_BUNDLE"
 echo ""
 
 # Step 4: Package DMG (委托独立脚本 package-dmg.sh：create-dmg 带图标布局，缺失回退 hdiutil)
-"$PWD/package-dmg.sh" "$APP_BUNDLE"
+"$ROOT/scripts/package-dmg.sh" "$APP_BUNDLE"
 echo ""
 echo "=== Build Complete ==="
 echo "App bundle: $APP_BUNDLE"
@@ -108,4 +112,4 @@ echo "Icon cache refreshed."
 echo ""
 echo "To run: open \"$APP_BUNDLE\""
 echo "To install: sudo cp -R \"$APP_BUNDLE\" /Applications/"
-echo "To repackage DMG only: ./package-dmg.sh"
+echo "To repackage DMG only: ./scripts/package-dmg.sh"
