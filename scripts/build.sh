@@ -97,9 +97,6 @@ codesign --verify --verbose=2 "$APP_BUNDLE" 2>&1 | grep -v "valid on disk" || tr
 echo "签名完成: $APP_BUNDLE"
 echo ""
 
-# Step 4: Package DMG (委托独立脚本 package-dmg.sh：create-dmg 带图标布局，缺失回退 hdiutil)
-"$ROOT/scripts/package-dmg.sh" "$APP_BUNDLE"
-echo ""
 echo "=== Build Complete ==="
 echo "App bundle: $APP_BUNDLE"
 echo ""
@@ -112,4 +109,4 @@ echo "Icon cache refreshed."
 echo ""
 echo "To run: open \"$APP_BUNDLE\""
 echo "To install: sudo cp -R \"$APP_BUNDLE\" /Applications/"
-echo "To repackage DMG only: ./scripts/package-dmg.sh"
+echo "To package DMG: ./scripts/package-dmg.sh"

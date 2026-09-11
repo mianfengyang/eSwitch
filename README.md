@@ -61,18 +61,18 @@ macOS 环形应用切换器，玻璃拟态面板，一键呼出快速切换应�
 ### 直接运行构建产物
 
 ```bash
-# 在项目根目录一键构建出带签名的 .app + DMG
+# 在项目根目录构建出带签名的 .app
 ./scripts/build.sh
 open build/eSwitch.app
 
-# 只重新打包 DMG（不重新构建）
+# 打包 DMG（不重新构建）
 ./scripts/package-dmg.sh
 
 # 安装到 Applications（如需）
 sudo cp -R build/eSwitch.app /Applications/
 ```
 
-`scripts/build.sh` 会自动优先使用钥匙串中的 `Apple Development` 证书签名；没有对应证书时请改用你自己的身份或 ad-hoc 签名。DMG 优先用 `create-dmg`（带图标布局），未安装时回退 `hdiutil`。
+`scripts/build.sh` 只负责构建 + 签名 .app；DMG 由 `scripts/package-dmg.sh` 单独打包。`build.sh` 会自动优先使用钥匙串中的 `Apple Development` 证书签名；没有对应证书时请改用你自己的身份或 ad-hoc 签名。DMG 优先用 `create-dmg`（带图标布局），未安装时回退 `hdiutil`。
 
 ### 手动构建
 

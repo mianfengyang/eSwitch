@@ -9,7 +9,7 @@ cd "$ROOT"
 APP_NAME="eSwitch"
 APP_BUNDLE="build/${APP_NAME}.app"
 
-# 若指定了 app bundle 路径则用之（默认 build/eSwitch.app，通常由 ./build.sh 产出）
+# 若指定了 app bundle 路径则用之（默认 build/eSwitch.app，通常由 ./scripts/build.sh 产出）
 if [ -n "${1:-}" ]; then
     case "$1" in
         /*) APP_BUNDLE="$1" ;;
@@ -18,7 +18,7 @@ if [ -n "${1:-}" ]; then
 fi
 
 if [ ! -d "$APP_BUNDLE" ]; then
-    echo "!! 未找到 $APP_BUNDLE，请先运行 ./build.sh 构建"
+    echo "!! 未找到 $APP_BUNDLE，请先运行 ./scripts/build.sh 构建"
     exit 1
 fi
 
