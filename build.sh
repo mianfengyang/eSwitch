@@ -28,11 +28,11 @@ echo "Bundle ID: $BUNDLE_ID"
 echo ""
 
 # Step 1: Build with Swift Package Manager
-echo "[1/4] Building with Swift Package Manager..."
+echo "[1/5] Building with Swift Package Manager..."
 swift build -c release
 
 # Step 2: Create .app bundle structure
-echo "[2/4] Creating .app bundle..."
+echo "[2/5] Creating .app bundle..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -84,7 +84,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 EOF
 
 # Step 4: Code sign (固定身份 + 固定 bundle ID，TCC 权限跨更新保留的关键)
-echo "[4/4] Code signing..."
+echo "[4/5] Code signing..."
 codesign --force --deep --options runtime \
     --sign "$IDENTITY" \
     --entitlements "$ENTITLEMENTS" \
@@ -92,8 +92,36 @@ codesign --force --deep --options runtime \
 codesign --verify --verbose=2 "$APP_BUNDLE" 2>&1 | grep -v "valid on disk" || true
 echo "签名完成: $APP_BUNDLE"
 echo ""
+
+# Step 5: Package DMG (create-dmg 带图标布局；缺失时回退 hdiutil 无布局)
+echo "[5/5] Packaging DMG..."
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || echo "1.0")
+DMG="build/${APP_NAME}-${VERSION}.dmg"
+rm -f "$DMG"
+
+if command -v create-dmg >/dev/null 2>&1; then
+    create-dmg \
+        --volname "$APP_NAME" \
+        --window-size 640 440 \
+        --app-drop-link 400 185 \
+        --icon-size 100 \
+        --icon "$APP_NAME.app" 170 190 \
+        "$DMG" \
+        "$APP_BUNDLE"
+else
+    echo "!! create-dmg 未安装，回退 hdiutil（无图标布局）"
+    STAGE="build/dmg-stage"
+    rm -rf "$STAGE" && mkdir -p "$STAGE"
+    cp -R "$APP_BUNDLE" "$STAGE/"
+    ln -s /Applications "$STAGE/Applications"
+    hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+    rm -rf "$STAGE"
+fi
+echo "DMG 打包完成: $DMG"
+echo ""
 echo "=== Build Complete ==="
 echo "App bundle: $APP_BUNDLE"
+echo "DMG:        $DMG"
 echo ""
 
 # Refresh Finder icon cache (mtime bump)
