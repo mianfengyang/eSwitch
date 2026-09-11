@@ -28,11 +28,11 @@ echo "Bundle ID: $BUNDLE_ID"
 echo ""
 
 # Step 1: Build with Swift Package Manager
-echo "[1/5] Building with Swift Package Manager..."
+echo "[1/3] Building with Swift Package Manager..."
 swift build -c release
 
 # Step 2: Create .app bundle structure
-echo "[2/5] Creating .app bundle..."
+echo "[2/3] Creating .app bundle..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -51,7 +51,7 @@ if [ -d "eSwitch/Resources/Assets.xcassets" ]; then
     cp -r "eSwitch/Resources/Assets.xcassets" "$APP_BUNDLE/Contents/Resources/"
 fi
 
-# Step 3: Create Info.plist
+# Create Info.plist (part of step 2: .app bundle)
 cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "Apple Inc." "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -83,8 +83,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 </plist>
 EOF
 
-# Step 4: Code sign (固定身份 + 固定 bundle ID，TCC 权限跨更新保留的关键)
-echo "[4/5] Code signing..."
+# Step 3: Code sign (固定身份 + 固定 bundle ID，TCC 权限跨更新保留的关键)
+echo "[3/3] Code signing..."
 codesign --force --deep --options runtime \
     --sign "$IDENTITY" \
     --entitlements "$ENTITLEMENTS" \
@@ -93,35 +93,11 @@ codesign --verify --verbose=2 "$APP_BUNDLE" 2>&1 | grep -v "valid on disk" || tr
 echo "签名完成: $APP_BUNDLE"
 echo ""
 
-# Step 5: Package DMG (create-dmg 带图标布局；缺失时回退 hdiutil 无布局)
-echo "[5/5] Packaging DMG..."
-VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || echo "1.0")
-DMG="build/${APP_NAME}-${VERSION}.dmg"
-rm -f "$DMG"
-
-if command -v create-dmg >/dev/null 2>&1; then
-    create-dmg \
-        --volname "$APP_NAME" \
-        --window-size 640 440 \
-        --app-drop-link 400 185 \
-        --icon-size 100 \
-        --icon "$APP_NAME.app" 170 190 \
-        "$DMG" \
-        "$APP_BUNDLE"
-else
-    echo "!! create-dmg 未安装，回退 hdiutil（无图标布局）"
-    STAGE="build/dmg-stage"
-    rm -rf "$STAGE" && mkdir -p "$STAGE"
-    cp -R "$APP_BUNDLE" "$STAGE/"
-    ln -s /Applications "$STAGE/Applications"
-    hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-    rm -rf "$STAGE"
-fi
-echo "DMG 打包完成: $DMG"
+# Step 4: Package DMG (委托独立脚本 package-dmg.sh：create-dmg 带图标布局，缺失回退 hdiutil)
+"$PWD/package-dmg.sh" "$APP_BUNDLE"
 echo ""
 echo "=== Build Complete ==="
 echo "App bundle: $APP_BUNDLE"
-echo "DMG:        $DMG"
 echo ""
 
 # Refresh Finder icon cache (mtime bump)
@@ -132,3 +108,4 @@ echo "Icon cache refreshed."
 echo ""
 echo "To run: open \"$APP_BUNDLE\""
 echo "To install: sudo cp -R \"$APP_BUNDLE\" /Applications/"
+echo "To repackage DMG only: ./package-dmg.sh"
