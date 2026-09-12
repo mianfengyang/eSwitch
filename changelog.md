@@ -24,6 +24,7 @@ All notable changes to eSwitch will be documented in this file.
     - 面板呼出/收起整体 scale + 淡入淡出弹簧动画（由状态模型驱动，每次呼出重播）
 
 ### Changed
+- **移除跳桌面方案（合成 ⌃+数字）** — 跨空间激活不再跳转桌面，统一使用系统原生 `activateAllWindows`（Cmd+Tab 语义，把窗口拉回当前 Space），失败退化为普通激活；Finder 激活同样不再跳转桌面；删除 `⌃+数字` 合成、空间扫描、桌面索引缓存与 `--selftest-ctrl` 自检，不再要求启用系统「切换桌面」快捷键
 - **GPU 占用优化** — 移除卡片双层阴影（切换动画时每帧重算高斯投影，是 GPU 峰值主因）、倒影高斯模糊，以及面板/卡片的 3 层渐变叠加，改为单层低密度纯色渲染；持续与峰值 GPU 占用显著下降，视觉基本不变（系统窗口阴影仍提供深度感）
 - **恢复两侧卡片 3D 斜切** — 重新启用侧卡绕 Y 轴透视旋转，保留 Compiz Ring 的环形纵深观感
 - **移除弃用 API** — `NSWorkspace.launchApplication("Finder")` 改为 `openApplication(at:configuration:)`，消除 macOS 11+ 编译警告

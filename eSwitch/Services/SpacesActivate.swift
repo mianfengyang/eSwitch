@@ -1,17 +1,12 @@
 import AppKit
-import ApplicationServices
 import CoreGraphics
 import Foundation
 
-// MARK: - Spaces (Virtual Desktops)
-// macOS 26 上 CGS 直接切换空间的私有符号（CGSSwitchToSpace 等）已被移除。
-// 实测合成 ⌃+数字（CGEvent keyboard events）可以触发系统"切换桌面"快捷键，
-// 因此采用更可靠的方案：按桌面序号绝对定位跳转。
-// 窗口→空间没有公开/可靠 API，所以采用探测扫描：
-//   对该显示器每个桌面序号依次 ⌃+N 跳转，每步检查该 PID 是否有窗口上屏，命中即停。
-// 每次跳转是绝对定位（指定序号），不依赖连续滑动，不会累积误差。
-// 需要辅助功能权限（AXIsProcessTrusted），eSwitch 启动时已请求。
-typealias CGSSpaceID = UInt32
+// MARK: - Spaces（虚拟桌面）—— 仅纯查询，不切换桌面
+// macOS 26 上 CGS 直接切换空间的私有符号（CGSSwitchToSpace 等）已被移除，
+// 本项目不再合成按键跳转桌面：跨空间激活统一交给系统原生 activateAllWindows
+// （=Cmd+Tab 语义：把目标应用在所有 Space 的窗口拉回当前 Space 并前置）。
+// 以下仅保留纯查询工具（空间环 / 当前空间 / 上屏检测），供桌面索引与自检使用。
 
 func cgsSymbol(_ name: String) -> UnsafeMutableRawPointer? {
     dlsym(dlopen(nil, RTLD_NOW), name)
@@ -34,7 +29,7 @@ struct ManagedDisplay {
 }
 
 /// 读取全部显示器的空间环。数据源为 CGS 私有 API CGSCopyManagedDisplaySpaces
-/// （替代已过时的 plist 路径），macOS 26 实测可用。
+/// （替代已过时的 plist 路径），macOS 26 实测可用。纯查询，不切换空间。
 func managedDisplaySpaces() -> [ManagedDisplay] {
     typealias Fn = @convention(c) (Int32) -> Unmanaged<CFArray>?
     guard let s = cgsSymbol("CGSCopyManagedDisplaySpaces") else { return [] }
@@ -65,135 +60,14 @@ func appOnScreen(pid: pid_t) -> Bool {
     return raw.contains { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) }
 }
 
-/// 把光标移到指定显示器中心（手势落点跟随光标所在显示器）。
-func warpCursorToDisplay(_ displayID: CGDirectDisplayID) {
-    let bounds = CGDisplayBounds(displayID)
-    let center = CGPoint(x: bounds.midX, y: bounds.midY)
-    _ = CGWarpMouseCursorPosition(center)
-}
-
-struct ManagedDisplayID {
-    let displayID: CGDirectDisplayID
-    let uuid: String
-}
-
-/// 枚举在线显示器及其 UUID（与 CGSCopyManagedDisplaySpaces 的 identifier 对应）
-func onlineDisplays() -> [ManagedDisplayID] {
-    let maxCount: UInt32 = 32
-    var count: UInt32 = 0
-    var ids = [CGDirectDisplayID](repeating: 0, count: Int(maxCount))
-    CGGetOnlineDisplayList(maxCount, &ids, &count)
-    var result: [ManagedDisplayID] = []
-    for i in 0..<Int(count) {
-        let id = ids[i]
-        guard let uuidRef = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue() else { continue }
-        let str = CFUUIDCreateString(nil, uuidRef) as String
-        result.append(ManagedDisplayID(displayID: id, uuid: str))
-    }
-    return result
-}
-
-// 数字键 → keycode（物理键盘布局）
-let digitKeycodes: [Int: CGKeyCode] = [1:18, 2:19, 3:20, 4:21, 5:23, 6:22, 7:26, 8:28, 9:25, 0:29]
-
-/// 合成 ⌃+数字 n 的按键事件（实测 macOS 26 上可切换桌面）。
-func postCtrlDigit(_ n: Int) {
-    guard let key = digitKeycodes[n] else { return }
-    let src = CGEventSource(stateID: .hidSystemState)
-    let down = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: true)
-    down?.flags = .maskControl
-    let up = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false)
-    up?.flags = .maskControl
-    down?.post(tap: .cgSessionEventTap)
-    up?.post(tap: .cgSessionEventTap)
-}
-
-/// 跳转到该显示器空间环中指定位置的桌面（⌃+位置号，位置号从 1 开始，即 ⌃+1=第 1 个）。
-/// 发送后轮询确认真的到达目标空间（合成事件也可能被丢，失败自动重试）。
-private func jumpToSpaceIndex(_ index: Int, identifier: String, ring: [UInt64]) -> Bool {
-    let target = ring[index]
-    for attempt in 0..<4 {
-        postCtrlDigit(index + 1)
-        let deadline = Date().addingTimeInterval(1.5)
-        while Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-            if cgsDisplayCurrentSpace(identifier: identifier) == target {
-                return true
-            }
-        }
-        log("space scan: ctrl+\(index + 1) #\(attempt + 1) did not reach \(target) on \(identifier)")
-    }
-    return false
-}
-
-/// 扫描所有显示器的所有空间，返回目标应用所在的显示器（空间的归属存在该 display 结构里）。
-/// 命中后系统停在该空间（光标保持在目标显示器）；找不到返回 nil，期间发生过的切换都已恢复。
-/// 只扫空间数 >= 2 的显示器（单空间显示器无需切换）。
-/// 跳转采用合成 ⌃+数字（用户需在系统设置里启用"键盘→快捷键→调度中心→切换桌面"），
-/// 每次跳转是绝对定位（指定序号），不依赖连续滑动，因此不会累积误差。
-func scanSpaceForApp(pid: pid_t, displays: [ManagedDisplay], uuidToDisplay: [String: CGDirectDisplayID]) -> CGSSpaceID? {
-    let cursorOrigin = CGEvent(source: nil)?.location
-    defer {
-        if let c = cursorOrigin { _ = CGWarpMouseCursorPosition(c) }
-    }
-
-    for display in displays where display.spaceIDs.count >= 2 {
-        guard let did = uuidToDisplay[display.identifier.lowercased()] else { continue }
-        // 用实时值而非快照（currentSpaceID 可能过期）
-        guard let original = cgsDisplayCurrentSpace(identifier: display.identifier) else { continue }
-        let ring = display.spaceIDs
-        guard let originalIdx = ring.firstIndex(of: original) else { continue }
-        let count = ring.count
-
-        warpCursorToDisplay(did)
-        Thread.sleep(forTimeInterval: 0.08)
-
-        // 从原桌面序号起，依次尝试其它序号，命中即停（留在目标桌面）
-        var found: CGSSpaceID?
-        for idx in 0..<count where idx != originalIdx {
-            guard jumpToSpaceIndex(idx, identifier: display.identifier, ring: ring) else {
-                log("space scan: stuck jumping to index \(idx) on \(display.identifier); abort this display")
-                break
-            }
-            Thread.sleep(forTimeInterval: 0.2)   // 等窗口上屏
-            if appOnScreen(pid: pid) {
-                found = CGSSpaceID(ring[idx])
-                log("space scan: found \(pid) on \(display.identifier) desktop \(idx + 1) space \(ring[idx])")
-                break
-            }
-        }
-
-        if found != nil {
-            return found
-        }
-
-        // 未命中：跳回原桌面（绝对定位，可靠）
-        if !jumpToSpaceIndex(originalIdx, identifier: display.identifier, ring: ring) {
-            log("space scan: failed to restore \(display.identifier) to desktop \(originalIdx + 1) space \(original)")
-        }
-    }
-    return nil
-}
-
-// MARK: - 桌面索引缓存（纯查询构建，不切换桌面）
-private var desktopIndex: [String: Set<pid_t>] = [:]
-private let indexQueue = DispatchQueue(label: "eswitch.desktop-index")
-private var indexLastBuilt = Date.distantPast
-
-/// 重建索引并存入缓存。走 CGS 空间窗口枚举（buildDesktopIndexSilent），
-/// 纯查询、毫秒级、不切换任何桌面，因此每次激活都可即时重建。
-func buildIndexNow() {
-    let newIndex = buildDesktopIndexSilent()
-    indexQueue.sync { desktopIndex = newIndex }
-    indexLastBuilt = Date()
-    log("desktop index: rebuilt \(newIndex.count) entries")
-}
+// MARK: - 跨虚拟桌面激活（不跳桌面）
 
 /// Finder bundle identifier — 系统进程，必须走 AppleScript 激活
 private let kFinderBundleID = "com.apple.finder"
 
-/// 跨虚拟桌面激活应用：当前空间可见则直接激活；否则用索引精确单跳；
-/// 索引缺失时回退到实时逐格扫描。整个流程不阻塞 UI。
+/// 跨虚拟桌面激活应用：当前空间可见则直接激活；否则用系统原生 activateAllWindows
+/// 把窗口拉回当前 Space（=Cmd+Tab 语义），失败退化为普通激活。
+/// 全程不跳转任何桌面，不阻塞 UI。
 func activateApp(_ app: AppInfo) {
     // Finder 是系统进程，NSRunningApplication.activate 对它无效（静默忽略）
     // 必须用 AppleScript "tell application 'Finder' to activate" 才能 bring-to-front
@@ -210,16 +84,10 @@ func activateApp(_ app: AppInfo) {
         return
     }
 
-    // 无辅助功能权限时退化为普通激活
-    guard AXIsProcessTrusted() else {
-        running.activate(options: [.activateIgnoringOtherApps])
-        return
-    }
-
     DispatchQueue.global(qos: .userInitiated).async {
-        // —— Orbit 方案：跨空间激活直接交给系统原生 activateAllWindows
-        // （=Cmd+Tab 语义：把目标应用在所有 Space 的窗口带上来并前置），
-        // 不需要自己跳桌面，从根上消除跳桌面/合成按键竞态。
+        // —— eSwitch 方案：跨空间激活直接交给系统原生 activateAllWindows
+        // （=Cmd+Tab 语义：把目标应用在所有 Space 的窗口拉回当前 Space 并前置），
+        // 不跳桌面，从根上消除跳桌面/合成按键竞态。
         let activateOptions: NSApplication.ActivationOptions = {
             if #available(macOS 14.0, *) {
                 return [.activateAllWindows]
@@ -229,87 +97,25 @@ func activateApp(_ app: AppInfo) {
         if running.activate(options: activateOptions) {
             for _ in 0..<6 { // 激活异步生效，最多轮询 ~1.2s 等窗口上屏
                 if appOnScreen(pid: app.pid) {
-                    log("activating \(app.name): Orbit activateAllWindows 生效（窗口拉回当前 Space）")
+                    log("activating \(app.name): eSwitch activateAllWindows 生效（窗口拉回当前 Space）")
                     return
                 }
                 Thread.sleep(forTimeInterval: 0.2)
             }
-            log("activating \(app.name): Orbit activateAllWindows 后仍无窗口上屏，回退原跳桌面方案")
+            log("activating \(app.name): eSwitch activateAllWindows 调用后仍无窗口上屏，退化为普通激活")
         } else {
-            log("activating \(app.name): Orbit activateAllWindows 调用失败，回退原跳桌面方案")
+            log("activating \(app.name): eSwitch activateAllWindows 调用失败，退化为普通激活")
         }
-
-        // 索引是毫秒级纯查询，每次都现建，保证最新（光标/切换动作只在跳转时发生一次）
-        buildIndexNow()
-        let snapshot = indexQueue.sync { desktopIndex }
-        let displays = managedDisplaySpaces()
-        let uuidToDisplay = Dictionary(uniqueKeysWithValues: onlineDisplays().map { ($0.uuid.lowercased(), $0.displayID) })
-
-        // 1) 用索引精确定位
-        if let hit = locate(app.pid, in: snapshot),
-           let did = uuidToDisplay[hit.display],
-           let disp = displays.first(where: { $0.identifier.lowercased() == hit.display }),
-           hit.desktopIndex < disp.spaceIDs.count {
-            let ring = disp.spaceIDs
-            log("activating \(app.name): index hit \(hit.display)@\(hit.desktopIndex) (space \(ring[hit.desktopIndex]))")
-            warpCursorToDisplay(did)
-            Thread.sleep(forTimeInterval: 0.08)
-            if jumpToSpaceIndex(hit.desktopIndex, identifier: disp.identifier, ring: ring) {
-                Thread.sleep(forTimeInterval: 0.4)
-                running.activate(options: [.activateIgnoringOtherApps])
-                return
-            }
-            log("activating \(app.name): index jump failed, fall back to scan")
-        } else {
-            log("activating \(app.name): no index hit, fall back to scan")
-        }
-
-        // 2) 索引未命中/失败 → 实时扫描
-        guard let target = scanSpaceForApp(pid: app.pid, displays: displays, uuidToDisplay: uuidToDisplay) else {
-            running.activate(options: [.activateIgnoringOtherApps])
-            return
-        }
-        log("activating \(app.name): found on space \(target)")
-        // 扫描结束时系统已停在该空间，稍等动画收尾再激活
-        Thread.sleep(forTimeInterval: 0.4)
+        // 兜底：普通激活（仅切换应用激活状态；窗口若在他 Space 则保持原处）
         running.activate(options: [.activateIgnoringOtherApps])
     }
 }
 
-/// Finder 专属激活方法：用 osascript + AppleScript 让 Finder bring itself forward。
+/// Finder 专属激活：用 osascript + AppleScript 让 Finder bring itself forward。
 /// NSRunningApplication.activate() 对 Finder 无效（Finder 是系统进程，忽略此调用）。
+/// 不跳桌面：Finder 窗口保持在其所在 Space，仅切换激活状态。
 private func activateFinder() {
-    // 与普通应用"拉到当前桌面"相反，Finder 保持"跳转到所在桌面"的语义
-    let finderPid = NSRunningApplication.runningApplications(withBundleIdentifier: kFinderBundleID).first?.processIdentifier ?? 0
     DispatchQueue.global(qos: .userInitiated).async {
-        log("activating Finder via osascript")
-        var jumpedToFinderSpace = false
-        // 不在当前桌面时才跳转（避免无谓的桌面动画）
-        if finderPid != 0 && !appOnScreen(pid: finderPid) {
-            buildIndexNow()
-            let snapshot = indexQueue.sync { desktopIndex }
-            let displays = managedDisplaySpaces()
-            let uuidToDisplay = Dictionary(uniqueKeysWithValues: onlineDisplays().map { ($0.uuid.lowercased(), $0.displayID) })
-
-            if let hit = locate(finderPid, in: snapshot),
-               let did = uuidToDisplay[hit.display],
-               let disp = displays.first(where: { $0.identifier.lowercased() == hit.display }),
-               hit.desktopIndex < disp.spaceIDs.count {
-                let ring = disp.spaceIDs
-                log("activating Finder: index hit \(hit.display)@\(hit.desktopIndex) (space \(ring[hit.desktopIndex]))")
-                warpCursorToDisplay(did)
-                Thread.sleep(forTimeInterval: 0.08)
-                jumpedToFinderSpace = jumpToSpaceIndex(hit.desktopIndex, identifier: disp.identifier, ring: ring)
-            }
-            if !jumpedToFinderSpace,
-               let target = scanSpaceForApp(pid: finderPid, displays: displays, uuidToDisplay: uuidToDisplay) {
-                log("activating Finder: found on space \(target)")
-                jumpedToFinderSpace = true
-            }
-            if jumpedToFinderSpace {
-                Thread.sleep(forTimeInterval: 0.4)
-            }
-        }
         // Finder 在后台时可能需要先启动（非弃用 API：openApplication）
         if let finderURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: kFinderBundleID) {
             NSWorkspace.shared.openApplication(at: finderURL, configuration: NSWorkspace.OpenConfiguration())
@@ -322,33 +128,4 @@ private func activateFinder() {
         task.waitUntilExit()
         log("Finder activated: exitCode=\(task.terminationStatus)")
     }
-}
-
-// MARK: - Self-test: 合成 ⌃+N 的序号语义（开发用 `--selftest-ctrl`）
-
-func runCtrlSelfTest() {
-    let displays = managedDisplaySpaces()
-    for d in displays {
-        let cur = cgsDisplayCurrentSpace(identifier: d.identifier)
-        log("selftest: display \(d.identifier) current=\(String(describing: cur)) ring=\(d.spaceIDs)")
-    }
-    let beforeInternal = cgsDisplayCurrentSpace(identifier: displays[0].identifier)
-
-    // 依次测 ⌃+1..6，观察每个数字会把内置/外接切到哪个空间
-    for n in 1...6 {
-        postCtrlDigit(n)
-        Thread.sleep(forTimeInterval: 1.0)
-        let curInt = displays.first.flatMap { cgsDisplayCurrentSpace(identifier: $0.identifier) }
-        let curExt = displays.dropFirst().first.flatMap { cgsDisplayCurrentSpace(identifier: $0.identifier) }
-        log("selftest: ctrl+\(n) -> internal=\(String(describing: curInt)) external=\(String(describing: curExt))")
-    }
-
-    // 恢复内置到最初
-    if beforeInternal != nil {
-        if let idx = displays[0].spaceIDs.firstIndex(of: beforeInternal!) {
-            postCtrlDigit(idx + 1)
-            Thread.sleep(forTimeInterval: 0.8)
-        }
-    }
-    exit(0)
 }

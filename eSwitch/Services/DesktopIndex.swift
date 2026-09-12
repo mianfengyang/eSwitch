@@ -4,13 +4,11 @@ import CoreGraphics
 import Foundation
 
 // MARK: - 桌面索引（应用 pid → (显示器, 桌面序号)）
-// 思路：给「应用 pid → (显示器, 桌面序号)」建索引，激活时单跳直达。
-// 原按桌面翻页扫描会静默切换用户桌面（体验问题），故改用 CGS 私有 API
-// CGSCopyWindowsWithOptionsForSpace 直接按空间枚举窗口——完全不切桌面。
+// 纯查询工具：用 CGS 私有 API CGSCopySpacesForWindows 直接按空间枚举窗口——完全不切桌面。
+// 桌面索引已不参与激活（跳桌面方案已移除），当前供 `--selftest-index` 自检使用。
 //
-// 序号语义（macOS 实测）：⌃+数字 只作用于「光标所在显示器」的空间环，
-// 且 N 对应空间环的下标 N-1（ring[0]→⌃+1, ring[1]→⌃+2, ...）。
-// 所以索引按「显示器 identifier + 桌面序号」组织，跳转前先把光标移到对应显示器。
+// 序号语义：桌面序号 = 空间环下标（ring[0]=第 1 个, ring[1]=第 2 个, ...）。
+// 索引按「显示器 identifier（小写 UUID）+ 桌面序号」组织。
 
 /// 窗口所属的空间 id 列表（CGS 私有 API CGSCopySpacesForWindows，纯查询不切桌面）。
 /// selector 0x3F = 全部窗口类别（桌面/全屏/系统/隐藏/完整/所有，实测 0x35 覆盖不全）。
