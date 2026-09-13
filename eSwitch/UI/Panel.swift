@@ -39,7 +39,9 @@ final class TransparentHostingView<Content: View>: NSHostingView<Content> {
 // MARK: - Show / Hide
 func showSwitcher() {
     log("showSwitcher")
-    currentApps = getApps()
+    // 强制全量重建（AppMonitor 缓存平时由生命周期通知增量维护，
+    // 每次呼出兜底一次，任何漏接的通知最多存活一个呼出周期）
+    currentApps = AppMonitor.shared.refresh()
     guard !currentApps.isEmpty else { log("no apps"); return }
     
     // 尝试从上次选择的位置开始
@@ -97,13 +99,84 @@ func hideSwitcher(activate: Bool = true) {
     
     if activate {
         // 字母定位后环心与 index 可能不同步，以环心为准激活
-        let idx = cubeState.jumpIndex ?? currentIndex
-        if !currentApps.isEmpty, idx >= 0, idx < currentApps.count {
+        var idx = cubeState.jumpIndex ?? currentIndex
+        guard !currentApps.isEmpty, idx >= 0, idx < currentApps.count else { return }
+        // 切走前验活：松键的几十毫秒内应用可能已退出/关光窗口，
+        // 盲激活会打到旧 pid 上（或激活无窗应用再打回无窗标记）
+        if !isAppActivatable(currentApps[idx]) {
+            log("hideSwitcher: target '\(currentApps[idx].name)' no longer activatable, re-picking")
+            if currentApps.count == 1 {
+                return
+            }
+            if idx > 0 {
+                idx -= 1
+            } else {
+                idx = currentApps.count - 1
+            }
+            currentIndex = idx
+            cubeState.index = idx
+            cubeState.jumpIndex = nil
+            cubeState.candidates = []
+        }
+        if idx < currentApps.count {
             let target = currentApps[idx]
             lastSelectedBundleID = target.id
             activateApp(target)
         }
     }
+}
+
+// MARK: - 生命周期（AppMonitor 通知驱动）
+
+/// 应用仍可供激活：未处于终止态，且仍有真实窗口（复用 getApps 同口径的窗口判定）。
+func isAppActivatable(_ app: AppInfo) -> Bool {
+    guard let running = NSRunningApplication(processIdentifier: app.pid),
+          !running.isTerminated else { return false }
+    if running.isHidden { return false }
+    return appHasWindows(pid: app.pid)
+}
+
+/// 呼出期间有应用退出（didTerminate 通知驱动）：删除卡片并修正选中位。
+/// 主线程调用（调用方已保证）。index 指向已删卡片时移到最近幸存应用。
+func removeTerminatedApp(id: String) {
+    guard let idx = currentApps.firstIndex(where: { $0.id == id }) else { return }
+    let wasSelected = (idx == currentIndex) || (idx == cubeState.jumpIndex)
+    currentApps.remove(at: idx)
+    guard !currentApps.isEmpty else {
+        currentIndex = 0
+        cubeState.index = 0
+        cubeState.jumpIndex = nil
+        cubeState.candidates = []
+        return
+    }
+    if wasSelected {
+        currentIndex = idx < currentApps.count ? idx : currentApps.count - 1
+        cubeState.index = currentIndex
+    } else if currentIndex >= currentApps.count {
+        currentIndex = currentApps.count - 1
+        cubeState.index = currentIndex
+    }
+    // 候选角标里指向被删位及之后的下标整体左移
+    cubeState.candidates = cubeState.candidates
+        .filter { $0 != idx }
+        .map { $0 > idx ? $0 - 1 : $0 }
+    cubeState.jumpIndex = cubeState.jumpIndex.map { $0 > idx ? $0 - 1 : $0 }
+    if cubeState.jumpIndex == idx, cubeState.jumpIndex != currentIndex {
+        // 环心被删：跳位已左移，保持"以环心为准"的语义
+        cubeState.jumpIndex = currentIndex
+    }
+    log("AppMonitor: card removed '\(currentApps.indices.contains(idx) ? currentApps[min(idx, currentApps.count - 1)].name : "?")'  count=\(currentApps.count)  selected=\(currentIndex)")
+}
+
+/// 呼出期间有应用启动（didLaunch 通知驱动）：追加卡片。主线程调用。
+func addLaunchedApp(_ app: AppInfo) {
+    guard !currentApps.contains(where: { $0.id == app.id }) else { return }
+    currentApps.append(app)
+    if currentIndex >= currentApps.count {
+        currentIndex = currentApps.count - 1
+    }
+    cubeState.index = currentIndex
+    log("AppMonitor: card added '\(app.name)'  count=\(currentApps.count)")
 }
 
 func rotateNext() {

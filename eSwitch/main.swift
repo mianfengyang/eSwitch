@@ -10,8 +10,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         log("Launched")
+        AppMonitor.shared.start()
         setupStatusBar()
         setupKeyboard()
+        // 生命周期 → UI：呼出期间应用启停实时增删卡片（缓存由 AppMonitor 内部维护，这里只管可见状态）
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: nil) { note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.activationPolicy == .regular,
+                  app.bundleIdentifier != Bundle.main.bundleIdentifier,
+                  let name = app.localizedName else { return }
+            let info = AppMonitor.shared.makeInfo(app: app, name: name, englishName: name)
+            DispatchQueue.main.async {
+                guard isVisible else { return }   // 关闭时 currentApps 下次呼出会全量重建
+                addLaunchedApp(info)
+            }
+        }
+        nc.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: nil) { note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let id = app.bundleIdentifier else { return }
+            DispatchQueue.main.async {
+                guard isVisible else { return }
+                removeTerminatedApp(id: id)
+            }
+        }
         if !AXIsProcessTrusted() {
             let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
             AXIsProcessTrustedWithOptions(opts)
