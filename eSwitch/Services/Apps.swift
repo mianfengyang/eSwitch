@@ -128,7 +128,22 @@ func getApps() -> [AppInfo] {
             return nil
         }
         guard let name = app.localizedName else { return nil }
-        return AppInfo(id: app.bundleIdentifier ?? UUID().uuidString, name: name, icon: app.icon, pid: app.processIdentifier)
+        // 英文名取自 Info.plist 原始值（不随系统语言本地化）：
+        // CFBundleDisplayName → CFBundleName 依次取第一个非空的。
+        // 卡片首字母与字母跳转匹配基于英文名；显示名仍是本地化的 name。
+        var englishName = name
+        if let url = app.bundleURL {
+            let plistPath = url.appendingPathComponent("Contents/Info.plist")
+            if let dict = NSDictionary(contentsOf: plistPath) as? [String: Any] {
+                for key in ["CFBundleDisplayName", "CFBundleName"] {
+                    if let v = dict[key] as? String, !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        englishName = v
+                        break
+                    }
+                }
+            }
+        }
+        return AppInfo(id: app.bundleIdentifier ?? UUID().uuidString, name: name, englishName: englishName, icon: app.icon, pid: app.processIdentifier)
     }
 }
 

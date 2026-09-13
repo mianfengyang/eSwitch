@@ -84,23 +84,28 @@ struct AppNamingTests {
         #expect("QQ".switcherInitial == "Q")
     }
 
-    @Test("中文取拼音首字母")
+    @Test("中文名取应用英文名首字母（拼音已移除，改用英文名）")
     func chinese() {
-        #expect("访达".switcherInitial == "F")
-        #expect("微信".switcherInitial == "W")
-        #expect("终端".switcherInitial == "Z")
+        // 卡片/跳转基于英文名（Info.plist 原始值）：终端→Terminal, 微信→WeChat, 访达→Finder
+        #expect("Terminal".switcherInitial == "T")
+        #expect("WeChat".switcherInitial == "W")
+        #expect("Finder".switcherInitial == "F")
+        // 无 ASCII 字母的字符串回退占位符
+        #expect("访达".switcherInitial == "•")
     }
 
-    @Test("emoji/符号跳过，空白名回退 ?")
+    @Test("emoji/符号跳过，空白名回退 •")
     func symbols() {
-        #expect("📷相机".switcherInitial == "X")
+        #expect("📷Camera".switcherInitial == "C")
         #expect("  Safari".switcherInitial == "S")
-        #expect("".switcherInitial == "?")
+        #expect("".switcherInitial == "•")
+        #expect("📷相机".switcherInitial == "•")
     }
 
-    @Test("letterMatchIndices 返回全部同首字母下标")
+    @Test("letterMatchIndices 返回全部同首字母下标（英文名）")
     func matchIndices() {
-        let names = ["Safari", "访达", "微信", "设置", "Google Chrome"]
+        // 名字为各自英文名：Safari / Finder / WeChat / Settings / Google Chrome
+        let names = ["Safari", "Finder", "WeChat", "Settings", "Google Chrome"]
         #expect(letterMatchIndices(names: names, letter: "S") == [0, 3])
         #expect(letterMatchIndices(names: names, letter: "W") == [2])
         #expect(letterMatchIndices(names: names, letter: "X") == [])

@@ -213,7 +213,7 @@ struct AppCardView: View {
                     .font(.system(size: 72))
                     .foregroundColor(.secondary)
             }
-            Text(app.name.switcherInitial)
+            Text(app.englishName.switcherInitial)
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .foregroundColor(Self.initialColor)
                 .opacity(0.95)
@@ -231,7 +231,7 @@ struct AppCardView: View {
                 if showCandidateBadge {
                     // 字母定位候选角标：同首字母应用保留原环位并高亮提示
                     // （环心卡片不叠加：其内容区首字母已足够醒目）
-                    Text(app.name.switcherInitial)
+                    Text(app.englishName.switcherInitial)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundColor(AppCardView.initialColor)
                         .padding(.horizontal, 5)

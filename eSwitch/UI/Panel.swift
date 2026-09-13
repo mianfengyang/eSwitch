@@ -142,7 +142,7 @@ func letterMatchIndices(names: [String], letter: String) -> [Int] {
 func jumpToLetter(_ letter: Character) {
     guard !currentApps.isEmpty else { return }
     let up = letter.uppercased()
-    let matches = letterMatchIndices(names: currentApps.map(\.name), letter: up)
+    let matches = letterMatchIndices(names: currentApps.map(\.englishName), letter: up)
     guard let first = matches.first else {
         log("jump '\(up)': no match")
         return

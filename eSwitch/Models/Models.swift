@@ -13,6 +13,9 @@ enum PanelScreenMode: String, CaseIterable {
 struct AppInfo {
     let id: String
     let name: String
+    /// 英文名（Info.plist CFBundleDisplayName/CFBundleName 原始值，未随系统语言本地化）；
+    /// 取不到时回退 name。卡片首字母与字母跳转匹配基于它，面板显示名仍用 name。
+    let englishName: String
     let icon: NSImage?
     let pid: pid_t
 }
