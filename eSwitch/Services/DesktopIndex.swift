@@ -12,7 +12,8 @@ import Foundation
 
 /// 窗口所属的空间 id 列表（CGS 私有 API CGSCopySpacesForWindows，纯查询不切桌面）。
 /// selector 0x3F = 全部窗口类别（桌面/全屏/系统/隐藏/完整/所有，实测 0x35 覆盖不全）。
-private func spacesOfWindow(_ windowID: CGWindowID, conn: Int32) -> [UInt64] {
+/// 供 DesktopIndex 与 runWindowsSelfTest（Apps.swift）使用。
+func spacesOfWindow(_ windowID: CGWindowID, conn: Int32) -> [UInt64] {
     typealias Fn = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
     guard let s = cgsSymbol("CGSCopySpacesForWindows") else { return [] }
     let f = unsafeBitCast(s, to: Fn.self)

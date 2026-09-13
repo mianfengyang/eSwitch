@@ -52,6 +52,10 @@ if CommandLine.arguments.contains("--selftest-index") {
     runIndexSelfTest()
     exit(0)
 }
+if let i = CommandLine.arguments.firstIndex(of: "--selftest-windows"), i + 1 < CommandLine.arguments.count {
+    runWindowsSelfTest(CommandLine.arguments[i + 1])
+    exit(0)
+}
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)

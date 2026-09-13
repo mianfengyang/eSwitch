@@ -106,6 +106,11 @@ func activateApp(_ app: AppInfo) {
         } else {
             log("activating \(app.name): eSwitch activateAllWindows 调用失败，退化为普通激活")
         }
+        // 切完无窗：打自愈标记，下次建列表时排除（应用重新开出/还原窗口即恢复）
+        if !appOnScreen(pid: app.pid) {
+            markSuspectWindowless(app.pid)
+            log("activating \(app.name): 仍无上屏窗口，已标记为切完无窗")
+        }
         // 兜底：普通激活（仅切换应用激活状态；窗口若在他 Space 则保持原处）
         running.activate(options: [.activateIgnoringOtherApps])
     }
