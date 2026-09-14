@@ -4,6 +4,8 @@ macOS 环形应用切换器，玻璃拟态面板，一键呼出快速切换应�
 
 按住热键呼出切换器，每按一次切换到下一个应用，松开即激活选中应用 —— 支持跨虚拟桌面（Spaces）：窗口自动拉回当前 Space，无需移动鼠标、不跳转桌面。
 
+![eSwitch 环形玻璃拟态切换器运行效果](assets/eSwitch-sc.png)
+
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
 ![macOS](https://img.shields.io/badge/macOS-12%2B-lightgrey)
 ![Version](https://img.shields.io/badge/Version-1.2-blue)
