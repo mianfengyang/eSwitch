@@ -2,15 +2,14 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-// MARK: - 激活（v1.4 起统一 open -a）
-// 松键激活单纯执行 `open -a <应用真实路径>`（LaunchServices 激活，= 点击 Dock 图标语义；
-// 用路径避免本地化显示名/注册名不一致的匹配坑，见 activateApp）：
-//   - 应用有窗口 → 带到前台（窗口在当前桌面则无跳动感）；
-//   - 窗口全在其他桌面 → 遵循系统 Mission Control「切换到某个应用程序时，
-//     转到该应用已打开窗口的 Space」设置（默认开 → 切到窗口所在桌面）；
-//   - 无窗口（进程活着但关光窗口）→ 触发系统 reopen 事件，应用按需开出窗口；
-//   - 进程已不存在 → 重新启动（= Dock 图标行为）。
-// 全程不依赖 AX 窗口判据，因此无窗应用不再需要过滤。
+// MARK: - 激活（v1.5 Finder 恢复 AppleScript）
+// 激活策略：
+//   - Finder（com.apple.finder）：AppleScript "tell application Finder to activate"
+//     因为 Finder 是系统进程，open -a 在跨 Space 时无法将窗口拉回当前 Space，
+//     AppleScript 才能可靠 bring Finder 到当前 Space 并前置窗口。
+//   - 其它应用：单纯执行 `open -a <应用真实路径>`（LaunchServices 激活，= 点击 Dock 图标）。
+//     用路径避免本地化显示名/注册名不一致的匹配坑，路径口径 17/17 全部可打开。
+//     覆盖状态：有窗口→前台、跨空间→open -a 会遵循系统行为、无窗→reopen、进程退出→重启。
 // 下方保留纯查询工具（空间环 / 当前空间），供桌面索引与自检使用。
 
 func cgsSymbol(_ name: String) -> UnsafeMutableRawPointer? {
@@ -59,20 +58,20 @@ func cgsDisplayCurrentSpace(identifier: String) -> UInt64? {
     return unsafeBitCast(s, to: Fn.self)(cgsMainConnectionID(), identifier as CFString)
 }
 
+/// Finder bundle identifier — 系统进程，需 AppleScript 激活才能跨 Space 拉回当前 Space。
+private let kFinderBundleID = "com.apple.finder"
+
 // MARK: - 激活
 
-/// 打开/激活目标应用：单纯执行 `/usr/bin/open -a <应用真实路径>`（等价于 `open -a xxx.app`，= 点击 Dock 图标）。
-///
-/// 传 bundle 真实路径而非显示名：`open -a` 按 LaunchServices 注册名匹配，
-/// 本地化显示名不可靠（实测本机 17 个应用中 9 个按显示名匹配失败：Safari/终端/Code/访达/App Store/图书/备忘录/系统设置/音乐）；
-/// 路径口径 17/17 全部可打开（含 VS Code，其注册名与文件名不一致）。
-/// 这条指令覆盖所有状态，无需任何额外逻辑：
-///   - 无窗应用（进程在、窗口全关）→ reopen 事件开出窗口（实测生效）；
-///   - 窗口在任意桌面 → 被激活（遵循系统 Dock 语义）；
-///   - 进程已退出 → 重新启动。
-/// 后台队列里跑，不阻塞 UI。
+/// 打开/激活目标应用：
+///   - Finder → AppleScript（open -a 在跨 Space 时无法拉回 Finder 窗口）
+///   - 其它应用 → `open -a <路径>`
 func activateApp(_ app: AppInfo) {
-    // 主线程解析路径：松键瞬间 pid 刚经过列表刷新，此刻取 bundleURL 最可靠；取不到回退显示名
+    if app.id == kFinderBundleID {
+        activateFinderViaAppleScript()
+        return
+    }
+    // 非 Finder：走 open -a 策略
     let path = NSRunningApplication(processIdentifier: app.pid)?.bundleURL?.path
     let target = (path != nil && FileManager.default.fileExists(atPath: path!)) ? path! : app.name
     let name = app.name
@@ -87,5 +86,23 @@ func activateApp(_ app: AppInfo) {
         } catch {
             log("activating \(name): open -a '\(target)' failed: \(error.localizedDescription)")
         }
+    }
+}
+
+/// Finder 专属激活：用 osascript + AppleScript 让 Finder bring itself forward。
+/// Finder 是系统进程，NSRunningApplication.activate / open -a 在跨 Space 时
+/// 无法将窗口拉回当前 Space，AppleScript 才能可靠激活。
+private func activateFinderViaAppleScript() {
+    DispatchQueue.global(qos: .userInitiated).async {
+        // Finder 在后台时可能需先确保运行
+        if let finderURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: kFinderBundleID) {
+            NSWorkspace.shared.openApplication(at: finderURL, configuration: NSWorkspace.OpenConfiguration())
+        }
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", "tell application \"Finder\" to activate"]
+        task.launch()
+        task.waitUntilExit()
+        log("Finder activated: exitCode=\(task.terminationStatus)")
     }
 }
