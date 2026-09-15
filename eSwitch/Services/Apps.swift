@@ -6,7 +6,7 @@ import CoreGraphics
 /// 菜单栏占位窗口形状：每个应用每个显示器各有一个（宽 = 屏宽，高 = 菜单栏高度，
 /// 停放在屏幕外或顶部，如 1920x30 / 1728x33）。不能算真实窗口，
 /// 否则"关光窗口但进程不退出"的应用永远无法被列表过滤。
-private func isMenubarPlaceholder(w: CGFloat, h: CGFloat) -> Bool {
+internal func isMenubarPlaceholder(w: CGFloat, h: CGFloat) -> Bool {
     return h <= 36 && w >= 500
 }
 
