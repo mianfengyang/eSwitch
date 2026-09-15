@@ -74,12 +74,8 @@ if CommandLine.arguments.contains("--selftest-index") {
     runIndexSelfTest()
     exit(0)
 }
-if let i = CommandLine.arguments.firstIndex(of: "--selftest-windows"), i + 1 < CommandLine.arguments.count {
-    runWindowsSelfTest(CommandLine.arguments[i + 1])
-    exit(0)
-}
-if let i = CommandLine.arguments.firstIndex(of: "--selftest-ax"), i + 1 < CommandLine.arguments.count {
-    runAXSelfTest(CommandLine.arguments[i + 1])
+if CommandLine.arguments.contains("--selftest-list") {
+    runListSelfTest()
     exit(0)
 }
 

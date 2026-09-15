@@ -4,6 +4,17 @@ All notable changes to eSwitch will be documented in this file.
 
 ---
 
+## [1.4] - 2026-09-15
+
+### Changed
+- **激活逻辑改为单纯执行 `open -a <应用真实路径>`** — 松键即执行 `/usr/bin/open -a <应用 bundle 真实路径>`（即 `open -a xxx.app`，= 点击 Dock 图标语义），无任何额外逻辑：这条指令覆盖所有状态——无窗应用（进程在、窗口全关）经 reopen 事件开出窗口（实测生效）；任意桌面的应用都被激活（遵循系统 Dock 语义，按 Mission Control「切换到某个应用程序时，转到该应用已打开窗口的 Space」设置切到窗口所在桌面，默认开）；进程已退出则重新启动。参数用真实路径而非显示名：`open -a` 按 LaunchServices 注册名匹配，本地化显示名不可靠（实测本机 17 个应用中 9 个按显示名匹配失败：Safari/终端/Code/访达/App Store/图书/备忘录/系统设置/音乐；VS Code 注册名「Code」与文件名「Visual Studio Code」不一致）；路径口径 17/17 全部可打开，release 包端到端实测生效（松键日志 `open -a '<bundle路径>' exit=0`，目标应用前台）。替代原 `NSRunningApplication.activate` + `activateAllWindows` 轮询、普通激活退化、Finder 专属 AppleScript 分支；移除松键前验活（`isAppActivatable`）与改选相邻应用逻辑（open -a 对任何状态都能正确打开，无需预判）
+- **列表口径改为「唯一移除条件是进程退出」** — `getApps` 不再按窗口状态过滤（真实窗口判定 /「切完无窗」自愈标记），也不再排除 ⌘H 隐藏应用；列表收录全部已打开的常规 GUI 应用（仅排除 eSwitch 自身与退出中进程）；呼出期间应用退出实时删卡（didTerminate 通知）。窗口判据代码整体删除（`AppWindows.swift` 整个文件：`appHasRealWindows` / `axWindowCount` / `cgWindowsOf` / `cgHasOnScreenRealWindow`，以及 `isRealWindow` / `hasRealWindow` / `isMenubarPlaceholder`），`--selftest-windows` / `--selftest-ax` 自检一并移除；移除不再使用的 `appOnScreen` / `isFinder` / `markSuspectWindowless` / `isSuspectWindowless`
+- **新增 `--selftest-list` 自检** — 打印当前切换列表（本地化名/英文名/pid/bundle 路径——即 open -a 实际收到的参数/隐藏状态），验证「无窗/隐藏应用也列入，仅进程退出移除」口径
+- **修复 `build.sh` 拷入过期二进制** — Swift 6.4+ 产物目录改到 `.build/out/Products/Release` 新布局，脚本硬编码的旧布局 `.build/arm64-apple-macosx/release` 残留 v1.3 二进制，导致每次 release 构建实际拷入的是旧版；改用 `swift build -c release --show-bin-path` 解析产物目录
+- **版本号 1.3 → 1.4** — Info.plist/build.sh/菜单/设置页/README badge 同步
+
+---
+
 ## [1.3] - 2026-09-15
 
 ### Changed

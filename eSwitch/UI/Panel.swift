@@ -98,43 +98,18 @@ func hideSwitcher(activate: Bool = true) {
     switchPanel?.orderOut(nil)
     
     if activate {
-        // 字母定位后环心与 index 可能不同步，以环心为准激活
-        var idx = cubeState.jumpIndex ?? currentIndex
+        // 字母定位后环心与 index 可能不同步，以环心为准
+        let idx = cubeState.jumpIndex ?? currentIndex
         guard !currentApps.isEmpty, idx >= 0, idx < currentApps.count else { return }
-        // 切走前验活：松键的几十毫秒内应用可能已退出/关光窗口，
-        // 盲激活会打到旧 pid 上（或激活无窗应用再打回无窗标记）
-        if !isAppActivatable(currentApps[idx]) {
-            log("hideSwitcher: target '\(currentApps[idx].name)' no longer activatable, re-picking")
-            if currentApps.count == 1 {
-                return
-            }
-            if idx > 0 {
-                idx -= 1
-            } else {
-                idx = currentApps.count - 1
-            }
-            currentIndex = idx
-            cubeState.index = idx
-            cubeState.jumpIndex = nil
-            cubeState.candidates = []
-        }
-        if idx < currentApps.count {
-            let target = currentApps[idx]
-            lastSelectedBundleID = target.id
-            activateApp(target)
-        }
+        // 不做任何预验活：open -a 天然覆盖所有状态（无窗开出窗口 / 任意桌面激活 /
+        // 进程已退出则重新启动），直接激活当前选中应用
+        let target = currentApps[idx]
+        lastSelectedBundleID = target.id
+        activateApp(target)
     }
 }
 
 // MARK: - 生命周期（AppMonitor 通知驱动）
-
-/// 应用仍可供激活：未处于终止态，且仍有真实窗口（统一用 AX 口径）。
-func isAppActivatable(_ app: AppInfo) -> Bool {
-    guard let running = NSRunningApplication(processIdentifier: app.pid),
-          !running.isTerminated else { return false }
-    if running.isHidden { return false }
-    return appHasRealWindows(app.pid)
-}
 
 /// 呼出期间有应用退出（didTerminate 通知驱动）：删除卡片并修正选中位。
 /// 主线程调用（调用方已保证）。index 指向已删卡片时移到最近幸存应用。

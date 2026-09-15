@@ -2,11 +2,16 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-// MARK: - Spaces（虚拟桌面）—— 仅纯查询，不切换桌面
-// macOS 26 上 CGS 直接切换空间的私有符号（CGSSwitchToSpace 等）已被移除，
-// 本项目不再合成按键跳转桌面：跨空间激活统一交给系统原生 activateAllWindows
-// （=Cmd+Tab 语义：把目标应用在所有 Space 的窗口拉回当前 Space 并前置）。
-// 以下仅保留纯查询工具（空间环 / 当前空间 / 上屏检测），供桌面索引与自检使用。
+// MARK: - 激活（v1.4 起统一 open -a）
+// 松键激活单纯执行 `open -a <应用真实路径>`（LaunchServices 激活，= 点击 Dock 图标语义；
+// 用路径避免本地化显示名/注册名不一致的匹配坑，见 activateApp）：
+//   - 应用有窗口 → 带到前台（窗口在当前桌面则无跳动感）；
+//   - 窗口全在其他桌面 → 遵循系统 Mission Control「切换到某个应用程序时，
+//     转到该应用已打开窗口的 Space」设置（默认开 → 切到窗口所在桌面）；
+//   - 无窗口（进程活着但关光窗口）→ 触发系统 reopen 事件，应用按需开出窗口；
+//   - 进程已不存在 → 重新启动（= Dock 图标行为）。
+// 全程不依赖 AX 窗口判据，因此无窗应用不再需要过滤。
+// 下方保留纯查询工具（空间环 / 当前空间），供桌面索引与自检使用。
 
 func cgsSymbol(_ name: String) -> UnsafeMutableRawPointer? {
     dlsym(dlopen(nil, RTLD_NOW), name)
@@ -54,83 +59,33 @@ func cgsDisplayCurrentSpace(identifier: String) -> UInt64? {
     return unsafeBitCast(s, to: Fn.self)(cgsMainConnectionID(), identifier as CFString)
 }
 
-/// 应用当前是否有窗口显示在屏幕上（即位于当前空间）
-func appOnScreen(pid: pid_t) -> Bool {
-    guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return true }
-    return raw.contains { ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) }
-}
+// MARK: - 激活
 
-// MARK: - 跨虚拟桌面激活（不跳桌面）
-
-/// Finder bundle identifier — 系统进程，必须走 AppleScript 激活
-private let kFinderBundleID = "com.apple.finder"
-
-/// 跨虚拟桌面激活应用：当前空间可见则直接激活；否则用系统原生 activateAllWindows
-/// 把窗口拉回当前 Space（=Cmd+Tab 语义），失败退化为普通激活。
-/// 全程不跳转任何桌面，不阻塞 UI。
+/// 打开/激活目标应用：单纯执行 `/usr/bin/open -a <应用真实路径>`（等价于 `open -a xxx.app`，= 点击 Dock 图标）。
+///
+/// 传 bundle 真实路径而非显示名：`open -a` 按 LaunchServices 注册名匹配，
+/// 本地化显示名不可靠（实测本机 17 个应用中 9 个按显示名匹配失败：Safari/终端/Code/访达/App Store/图书/备忘录/系统设置/音乐）；
+/// 路径口径 17/17 全部可打开（含 VS Code，其注册名与文件名不一致）。
+/// 这条指令覆盖所有状态，无需任何额外逻辑：
+///   - 无窗应用（进程在、窗口全关）→ reopen 事件开出窗口（实测生效）；
+///   - 窗口在任意桌面 → 被激活（遵循系统 Dock 语义）；
+///   - 进程已退出 → 重新启动。
+/// 后台队列里跑，不阻塞 UI。
 func activateApp(_ app: AppInfo) {
-    // Finder 是系统进程，NSRunningApplication.activate 对它无效（静默忽略）
-    // 必须用 AppleScript "tell application 'Finder' to activate" 才能 bring-to-front
-    if app.id == kFinderBundleID {
-        activateFinder()
-        return
-    }
-
-    guard let running = NSRunningApplication(processIdentifier: app.pid) else { return }
-
-    // 当前空间可见 → 直接激活
-    if appOnScreen(pid: app.pid) {
-        running.activate(options: [.activateIgnoringOtherApps])
-        return
-    }
-
+    // 主线程解析路径：松键瞬间 pid 刚经过列表刷新，此刻取 bundleURL 最可靠；取不到回退显示名
+    let path = NSRunningApplication(processIdentifier: app.pid)?.bundleURL?.path
+    let target = (path != nil && FileManager.default.fileExists(atPath: path!)) ? path! : app.name
+    let name = app.name
     DispatchQueue.global(qos: .userInitiated).async {
-        // —— eSwitch 方案：跨空间激活直接交给系统原生 activateAllWindows
-        // （=Cmd+Tab 语义：把目标应用在所有 Space 的窗口拉回当前 Space 并前置），
-        // 不跳桌面，从根上消除跳桌面/合成按键竞态。
-        let activateOptions: NSApplication.ActivationOptions = {
-            if #available(macOS 14.0, *) {
-                return [.activateAllWindows]
-            }
-            return [.activateAllWindows, .activateIgnoringOtherApps]
-        }()
-        if running.activate(options: activateOptions) {
-            for _ in 0..<6 { // 激活异步生效，最多轮询 ~1.2s 等窗口上屏
-                if appOnScreen(pid: app.pid) {
-                    log("activating \(app.name): eSwitch activateAllWindows 生效（窗口拉回当前 Space）")
-                    return
-                }
-                Thread.sleep(forTimeInterval: 0.2)
-            }
-            log("activating \(app.name): eSwitch activateAllWindows 调用后仍无窗口上屏，退化为普通激活")
-        } else {
-            log("activating \(app.name): eSwitch activateAllWindows 调用失败，退化为普通激活")
-        }
-        // 切完无窗：打自愈标记，下次建列表时排除（应用重新开出/还原窗口即恢复）
-        if !appOnScreen(pid: app.pid) {
-            markSuspectWindowless(app.pid)
-            log("activating \(app.name): 仍无上屏窗口，已标记为切完无窗")
-        }
-        // 兜底：普通激活（仅切换应用激活状态；窗口若在他 Space 则保持原处）
-        running.activate(options: [.activateIgnoringOtherApps])
-    }
-}
-
-/// Finder 专属激活：用 osascript + AppleScript 让 Finder bring itself forward。
-/// NSRunningApplication.activate() 对 Finder 无效（Finder 是系统进程，忽略此调用）。
-/// 不跳桌面：Finder 窗口保持在其所在 Space，仅切换激活状态。
-private func activateFinder() {
-    DispatchQueue.global(qos: .userInitiated).async {
-        // Finder 在后台时可能需要先启动（非弃用 API：openApplication）
-        if let finderURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: kFinderBundleID) {
-            NSWorkspace.shared.openApplication(at: finderURL, configuration: NSWorkspace.OpenConfiguration())
-        }
-        // 用 AppleScript 可靠激活
         let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", "tell application \"Finder\" to activate"]
-        task.launch()
-        task.waitUntilExit()
-        log("Finder activated: exitCode=\(task.terminationStatus)")
+        task.launchPath = "/usr/bin/open"
+        task.arguments = ["-a", target]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            log("activating \(name): open -a '\(target)' exit=\(task.terminationStatus)")
+        } catch {
+            log("activating \(name): open -a '\(target)' failed: \(error.localizedDescription)")
+        }
     }
 }

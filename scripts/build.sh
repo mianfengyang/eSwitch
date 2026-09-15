@@ -6,7 +6,6 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
 APP_NAME="eSwitch"
-BUILD_DIR=".build/arm64-apple-macosx/release"
 APP_BUNDLE="build/${APP_NAME}.app"
 ENTITLEMENTS="eSwitch/eSwitch.entitlements"
 
@@ -35,6 +34,11 @@ echo ""
 echo "[1/3] Building with Swift Package Manager..."
 swift build -c release
 
+# 产物目录用 --show-bin-path 解析：Swift 6.4+ 新布局在 .build/out/Products/Release，
+# 旧布局的 .build/arm64-apple-macosx/release 可能残留过期二进制，不能硬编码
+BIN_DIR=$(swift build -c release --show-bin-path)
+echo "产物目录: $BIN_DIR"
+
 # Step 2: Create .app bundle structure
 echo "[2/3] Creating .app bundle..."
 rm -rf "$APP_BUNDLE"
@@ -42,7 +46,7 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 # Copy the executable
-cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+cp "$BIN_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 # Copy the icon
@@ -68,7 +72,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 	<key>CFBundleIdentifier</key>
 	<string>${BUNDLE_ID}</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3</string>
+	<string>1.4</string>
 	<key>CFBundleVersion</key>
 	<string>3</string>
 	<key>CFBundleExecutable</key>
