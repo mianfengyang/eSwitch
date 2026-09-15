@@ -128,12 +128,12 @@ func hideSwitcher(activate: Bool = true) {
 
 // MARK: - 生命周期（AppMonitor 通知驱动）
 
-/// 应用仍可供激活：未处于终止态，且仍有真实窗口（复用 getApps 同口径的窗口判定）。
+/// 应用仍可供激活：未处于终止态，且仍有真实窗口（统一用 AX 口径）。
 func isAppActivatable(_ app: AppInfo) -> Bool {
     guard let running = NSRunningApplication(processIdentifier: app.pid),
           !running.isTerminated else { return false }
     if running.isHidden { return false }
-    return appHasWindows(pid: app.pid)
+    return appHasRealWindows(app.pid)
 }
 
 /// 呼出期间有应用退出（didTerminate 通知驱动）：删除卡片并修正选中位。
