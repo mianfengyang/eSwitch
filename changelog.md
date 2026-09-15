@@ -4,6 +4,18 @@ All notable changes to eSwitch will be documented in this file.
 
 ---
 
+## [1.3] - 2026-09-15
+
+### Changed
+- **真实窗口判据统一为 AX 口径（macOS 27）** — 新增 `appHasRealWindows()` 统一判据：Accessibility `kAXWindowsAttribute` 为主判据（macOS 27 实测：关窗后残留的隐藏窗口恰好返回 0，有窗应用计数与实际一致），AX 窗口数为 0 时用 CGWindowList 上屏口径兜底；辅助功能权限收回时自动回退 v1.2 CGWindowList 启发式（行为与旧版一致，老系统安全）。`getApps` 列表过滤与松键前验活（`isAppActivatable`）共用同一判据
+- **版本号 1.2 → 1.3** — Info.plist/build.sh/菜单/设置页/README badge 同步
+
+### Fixed
+- **`--selftest-ax <应用名>` 自检未接入 CLI** — `runAXSelfTest` 已定义但 main 未注册，带参运行时静默落入 GUI 事件循环；补接后与 `--selftest-index` / `--selftest-windows` 同级，可随时对比 AX / CGWindowList / 最终判据三口径
+- **移除不再使用的 `appHasWindows`** — 统一判据落地后只剩回退/自检两个调用方，并入 `appHasRealWindows` 自查分支
+
+---
+
 ## [1.2] - 2026-09-13
 
 ### Changed

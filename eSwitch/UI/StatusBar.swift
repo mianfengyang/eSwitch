@@ -53,7 +53,7 @@ func setupStatusBar() {
     
     let menu = NSMenu()
     
-    let titleItem = NSMenuItem(title: "eSwitch v1.2", action: nil, keyEquivalent: "")
+    let titleItem = NSMenuItem(title: "eSwitch v1.3", action: nil, keyEquivalent: "")
     titleItem.isEnabled = false
     menu.addItem(titleItem)
     menu.addItem(NSMenuItem.separator())

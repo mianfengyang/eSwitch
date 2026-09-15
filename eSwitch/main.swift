@@ -78,6 +78,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--selftest-windows"), i + 1 < C
     runWindowsSelfTest(CommandLine.arguments[i + 1])
     exit(0)
 }
+if let i = CommandLine.arguments.firstIndex(of: "--selftest-ax"), i + 1 < CommandLine.arguments.count {
+    runAXSelfTest(CommandLine.arguments[i + 1])
+    exit(0)
+}
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)

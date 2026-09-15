@@ -38,21 +38,6 @@ func hasRealWindow(in windows: [[String: Any]], cgsOK: Bool, conn: Int32, ringSe
     return windows.contains { isRealWindow($0, cgsOK: cgsOK, conn: conn, ringSet: ringSet) }
 }
 
-/// 应用是否有至少一个真实窗口（便捷入口：自己取窗口列表）。
-///
-/// 用 CGWindowListCopyWindowInfo(.optionAll) 判断而不是 AX：macOS 26 的
-/// AX kAXWindowsAttribute 不返回"所有窗口都在其他桌面空间"的应用的窗口，
-/// 会导致跨空间应用被列表漏掉。CGWindowList 能看到全部空间。
-/// 无权限时窗口层面仍可枚举（仅 name 为空）；枚举失败时保守返回 true。
-func appHasWindows(pid: pid_t) -> Bool {
-    guard let raw = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else { return true }
-    let cgsOK = cgsSymbol("CGSCopySpacesForWindows") != nil
-    let conn = cgsMainConnectionID()
-    let ringSet = cgsOK ? Set(managedDisplaySpaces().flatMap { $0.spaceIDs }) : []
-    let mine = raw.filter { (($0[kCGWindowOwnerPID as String] as? Int) ?? -1) == Int(pid) }
-    return hasRealWindow(in: mine, cgsOK: cgsOK, conn: conn, ringSet: ringSet)
-}
-
 // MARK: - "切完无窗"标记（自愈式）
 // 有些应用关窗后进程不退出，个别隐藏窗口 CGS 仍会归属到某个 Space，
 // 纯窗口判定拦不住这类残留；补一刀激活侧信号：
@@ -97,7 +82,6 @@ func getApps() -> [AppInfo] {
         if pid >= 0 { windowsByPid[pid, default: []].append(info) }
     }
     let cgsOK = cgsSymbol("CGSCopySpacesForWindows") != nil
-    let conn = cgsMainConnectionID()
     let ringSet = cgsOK ? Set(managedDisplaySpaces().flatMap { $0.spaceIDs }) : []
 
     return NSWorkspace.shared.runningApplications.compactMap { app in
@@ -114,8 +98,9 @@ func getApps() -> [AppInfo] {
         } else if app.isHidden {
             // 3) 排除 ⌘H 隐藏的应用
             reason = "hidden"
-        } else if raw != nil, !hasRealWindow(in: windowsByPid[Int(pid)] ?? [], cgsOK: cgsOK, conn: conn, ringSet: ringSet) {
-            // 4) 兜底：进程活着但没有真实窗口（菜单栏占位/隐藏窗口不算），不列。
+        } else if raw != nil, !appHasRealWindows(pid, windows: windowsByPid[Int(pid)] ?? [], cgsOK: cgsOK, ringSet: ringSet) {
+            // 4) 兜底：进程活着但没有真实窗口（统一口径：AX 为主判据，见 AppWindows.swift；
+            //    AX 不可用时回退 CGWindowList 启发式），不列。
             //    窗口枚举失败（raw == nil）时保守列入，保持旧行为。
             reason = "no real window"
         } else if isSuspectWindowless(pid) {
@@ -151,7 +136,7 @@ func getApps() -> [AppInfo] {
 
 /// 打印指定应用在全窗口列表（.optionAll，含所有 Space/离屏/最小化）里的全部窗口条目：
 /// 尺寸/alpha/layer/上屏状态 + CGS 空间归属 + 是否判定为真实窗口。
-/// 用于校准 appHasWindows 的过滤条件。
+/// 用于校准 appHasRealWindows 的过滤条件（统一口径，见 AppWindows.swift）。
 func runWindowsSelfTest(_ query: String) {
     let q = query.lowercased()
     let matches = NSWorkspace.shared.runningApplications
@@ -191,5 +176,5 @@ func runWindowsSelfTest(_ query: String) {
         }
     }
     if count == 0 { print("  (全窗口列表中无任何窗口)") }
-    print("  total: \(count) windows, appHasWindows=\(appHasWindows(pid: pid))  isSuspectWindowless=\(isSuspectWindowless(pid))")
+    print("  total: \(count) windows, appHasRealWindows=\(appHasRealWindows(pid))  isSuspectWindowless=\(isSuspectWindowless(pid))")
 }

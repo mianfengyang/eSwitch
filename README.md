@@ -8,7 +8,7 @@ macOS 环形应用切换器，玻璃拟态面板，一键呼出快速切换应�
 
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
 ![macOS](https://img.shields.io/badge/macOS-12%2B-lightgrey)
-![Version](https://img.shields.io/badge/Version-1.2-blue)
+![Version](https://img.shields.io/badge/Version-1.3-blue)
 
 ---
 

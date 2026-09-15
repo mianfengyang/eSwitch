@@ -64,7 +64,7 @@ struct SettingsView: View {
             
             HStack {
                 Spacer()
-                Text("v1.2")
+                Text("v1.3")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Spacer()

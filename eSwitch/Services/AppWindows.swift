@@ -17,10 +17,10 @@ import Foundation
 //    是「是否有真实窗口」最可靠的信号。
 //  - 依赖辅助功能权限（eSwitch 本就要求；权限被收回或查询失败时自动回退
 //    v1.2 的 CGWindowList 启发式，行为与旧版一致，老系统同样安全）。
-//  - 待验证项（`--selftest-ax <应用名>`）：macOS 26 曾出现「AX 不返回窗口全在
-//    其他桌面的应用的窗口」的问题（v1.2 因此弃用 AX）。若 27 上某应用确有其他
-//    桌面的真实窗口而 AX 返回 0，需在本文件 appHasRealWindows() 的 AX 分支里把
-//    「离屏且归属空间环的窗口」加回判据（即 hasRealWindow 口径）。
+//  - macOS 26 曾出现「AX 不返回窗口全在其他桌面的应用的窗口」的问题（v1.2 因此
+//    弃用 AX）。若 27 上某应用确有其他桌面的真实窗口而 AX 返回 0，需在本文件
+//    appHasRealWindows() 的 AX 分支里把「离屏且归属空间环的窗口」加回判据
+//    （即 hasRealWindow 口径）。`--selftest-ax <应用名>` 可随时对比三口径。
 
 /// 目标应用有多少个真实窗口（Accessibility `kAXWindowsAttribute`）。
 /// 辅助功能权限未生效或查询失败时返回 nil（调用方回退 CGWindowList 启发式）。
@@ -69,6 +69,12 @@ func cgHasOnScreenRealWindow(_ windows: [[String: Any]]) -> Bool {
 ///     nil = 未提供 —— AX 分支视为无上屏窗口，回退分支内部自查（枚举失败保守返回 true）。
 ///   - cgsOK/ringSet: 回退判据所需的 CGS 空间上下文（getApps 已算好时传入，省重复查询）；
 ///     nil 时内部自查。
+///
+/// 注意：macOS 26 曾出现「AX 不返回窗口全在其他桌面的应用的窗口」的问题（v1.2 因此弃用 AX，
+/// 改用 CGWindowList + CGS 空间归属判据）。macOS 27 实测 AX 口径对关窗残留应用恰好返回 0、
+/// 对跨空间应用仍能返回窗口；若后续发现 27 上某应用确有其他桌面的真实窗口而 AX 返回 0，
+/// 需在 AX 分支把「离屏且归属空间环的窗口」加回判据（即 hasRealWindow 口径）。
+/// 用 `--selftest-ax <应用名>` 可随时对比 AX / CGWindowList / 最终判据三口径。
 func appHasRealWindows(_ pid: pid_t, windows: [[String: Any]]? = nil, cgsOK: Bool? = nil, ringSet: Set<UInt64>? = nil) -> Bool {
     if let axCount = axWindowCount(pid) {
         if axCount > 0 { return true }
@@ -80,7 +86,10 @@ func appHasRealWindows(_ pid: pid_t, windows: [[String: Any]]? = nil, cgsOK: Boo
     let conn = cgsMainConnectionID()
     let ring = ringSet ?? (ok ? Set(managedDisplaySpaces().flatMap { $0.spaceIDs }) : [])
     if let windows { return hasRealWindow(in: windows, cgsOK: ok, conn: conn, ringSet: ring) }
-    return appHasWindows(pid: pid)   // 自查（枚举失败时保守返回 true，保持旧行为）
+    // 自查：枚举失败保守返回 true，保持旧行为
+    guard let raw = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else { return true }
+    let mine = raw.filter { (($0[kCGWindowOwnerPID as String] as? Int) ?? -1) == Int(pid) }
+    return hasRealWindow(in: mine, cgsOK: ok, conn: conn, ringSet: ring)
 }
 
 // MARK: - 自检：--selftest-ax <应用名>
