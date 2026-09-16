@@ -9,6 +9,15 @@ APP_NAME="eSwitch"
 APP_BUNDLE="build/${APP_NAME}.app"
 ENTITLEMENTS="eSwitch/eSwitch.entitlements"
 
+# 版本号：从最新 git tag 自动获取（格式 v1.5 → 1.5）
+VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+if [ -z "$VERSION" ]; then
+    echo "!! 未找到 git tag，使用默认版本 1.0"
+    VERSION="1.0"
+fi
+# Build 号：提交总数
+BUNDLE_VERSION=$(git rev-list --count HEAD 2>/dev/null || echo "1")
+
 # 签名身份：优先用环境变量 CODESIGN_IDENTITY 覆盖；否则取钥匙串里第一个 Apple Development 证书。
 # 固定身份 + 固定 bundle ID（com.mfyang.eswitch）是 TCC 跨更新保留权限的关键：
 # 每次更新签名身份/Bundle ID 不变 → 辅助功能、屏幕录制授权不会被重置。
@@ -28,6 +37,7 @@ echo "=== eSwitch Build Script ==="
 echo ""
 echo "签名身份: $IDENTITY"
 echo "Bundle ID: $BUNDLE_ID"
+echo "版本: $VERSION (build $BUNDLE_VERSION)"
 echo ""
 
 # Step 1: Build with Swift Package Manager
@@ -72,9 +82,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 	<key>CFBundleIdentifier</key>
 	<string>${BUNDLE_ID}</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.5</string>
+	<string>${VERSION}</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>${BUNDLE_VERSION}</string>
 	<key>CFBundleExecutable</key>
 	<string>eSwitch</string>
 	<key>CFBundleIconFile</key>

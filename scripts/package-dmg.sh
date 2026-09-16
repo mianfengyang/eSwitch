@@ -9,6 +9,24 @@ cd "$ROOT"
 APP_NAME="eSwitch"
 APP_BUNDLE="build/${APP_NAME}.app"
 
+# 版本号：从最新 git tag 自动获取（格式 v1.5 → 1.5）
+VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+if [ -z "$VERSION" ]; then
+    # 回退：从 Info.plist 读取
+    if [ -n "${1:-}" ]; then
+        case "$1" in
+            /*) APP_BUNDLE="$1" ;;
+            *)  APP_BUNDLE="$ORIG_PWD/$1" ;;
+        esac
+    fi
+    if [ -n "$APP_BUNDLE" ] && [ -d "$APP_BUNDLE" ]; then
+        VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || echo "1.0")
+    else
+        echo "!! 未找到 git tag，使用默认版本 1.0"
+        VERSION="1.0"
+    fi
+fi
+
 # 若指定了 app bundle 路径则用之（默认 build/eSwitch.app，通常由 ./scripts/build.sh 产出）
 if [ -n "${1:-}" ]; then
     case "$1" in
@@ -22,7 +40,6 @@ if [ ! -d "$APP_BUNDLE" ]; then
     exit 1
 fi
 
-VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || echo "1.0")
 DMG="$(pwd)/build/${APP_NAME}-arm_${VERSION}.dmg"
 rm -f "$DMG"
 
