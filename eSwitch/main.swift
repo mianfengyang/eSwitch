@@ -70,10 +70,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // MARK: - Main
-if CommandLine.arguments.contains("--selftest-index") {
-    runIndexSelfTest()
-    exit(0)
-}
 if CommandLine.arguments.contains("--selftest-list") {
     runListSelfTest()
     exit(0)
